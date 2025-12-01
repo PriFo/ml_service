@@ -1,0 +1,113 @@
+.dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: left;
+  transition: all 0.2s;
+}
+
+.trigger:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-text-primary);
+}
+
+.triggerIcon {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  display: inline-block;
+}
+
+.triggerLabel {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.triggerArrow {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 0.5rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.menuItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.95rem;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.menuItem:hover {
+  background: var(--color-bg-secondary);
+}
+
+.menuItem.active {
+  background: var(--color-bg-secondary);
+  color: var(--accent-color, var(--color-primary));
+}
+
+.menuIcon {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  display: inline-block;
+}
+
+.menuItem.active .menuIcon {
+  color: var(--accent-color, var(--color-primary));
+}
+
+.menuLabel {
+  flex: 1;
+}
+
+.checkmark {
+  color: var(--accent-color, var(--color-primary));
+  font-weight: 600;
+  flex-shrink: 0;
+}
+

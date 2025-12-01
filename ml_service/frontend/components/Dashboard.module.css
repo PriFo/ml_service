@@ -1,0 +1,58 @@
+.dashboard {
+  min-height: 100vh;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  display: flex;
+}
+
+.content {
+  flex: 1;
+  margin-left: 260px;
+  transition: margin-left 0.3s ease;
+  min-height: 100vh;
+}
+
+.main {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.loading,
+.error {
+  padding: 1rem;
+  margin: 1rem 0;
+  border-radius: var(--radius-md);
+}
+
+.loading {
+  background-color: var(--color-info);
+  color: white;
+}
+
+.error {
+  background-color: var(--color-error);
+  color: white;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.errorDismiss {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.errorDismiss:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

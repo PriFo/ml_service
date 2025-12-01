@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      - ML_SERVICE_HOST=0.0.0.0
+      - ML_SERVICE_PORT=8085
+      - ML_DB_PATH=/data/ml_store.db
+      - ML_ARTIFACTS_ROOT=/app/ml_artifacts
+      - ML_ADMIN_API_TOKEN=${ML_ADMIN_API_TOKEN:-your_secret_token_min_32_chars}
+    volumes:
+      - ./ml_artifacts:/app/ml_artifacts
+      - ./data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "6565:6565"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8085
+      - NEXT_PUBLIC_WEBSOCKET_URL=ws://localhost:8085/ws
+      - PORT=6565
+    depends_on:
+      - api
+    restart: unless-stopped
+

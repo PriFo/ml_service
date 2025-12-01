@@ -1,0 +1,27 @@
+.container {
+  display: flex;
+  gap: 0.5rem;
+  background-color: var(--color-bg-secondary);
+  padding: 0.25rem;
+  border-radius: var(--radius-md);
+}
+
+.button {
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all var(--transition-fast);
+}
+
+.button:hover {
+  background-color: var(--color-bg-primary);
+}
+
+.button.active {
+  background-color: var(--color-primary);
+  color: white;
+}
+
