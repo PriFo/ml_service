@@ -2,6 +2,8 @@
 import json
 import uuid
 import logging
+import time
+import sqlite3
 from datetime import datetime, date, timedelta
 from typing import List, Optional
 from dateutil.parser import parse as parse_date
@@ -166,10 +168,6 @@ class ModelRepository:
                 UPDATE models SET {set_clause} WHERE model_key = ?
             """, list(kwargs.values()) + [model_key])
         return True
-
-
-# Backward compatibility alias
-TrainingJobRepository = JobRepository
 
 
 class ClientDatasetRepository:
@@ -422,6 +420,10 @@ class AlertRepository:
                 for row in rows
             ]
     
+    def get_active(self) -> List[Alert]:
+        """Get all active (non-dismissed) alerts"""
+        return self.get_all(dismissed=False)
+    
     def dismiss(self, alert_id: str, dismissed_by: str) -> bool:
         """Dismiss an alert"""
         with db.get_connection() as conn:
@@ -621,6 +623,87 @@ class JobRepository:
             """, params).fetchall()
             
             return [self._row_to_job(dict(row)) for row in rows]
+    
+    def get_queued_jobs(self, model_key: Optional[str] = None) -> List[Job]:
+        """Get all queued jobs, optionally filtered by model_key"""
+        with db.get_connection() as conn:
+            conditions = ["status = 'queued'"]
+            params = []
+            
+            if model_key:
+                conditions.append("model_key = ?")
+                params.append(model_key)
+            
+            where_clause = " AND ".join(conditions)
+            
+            rows = conn.execute(f"""
+                SELECT * FROM jobs 
+                WHERE {where_clause}
+                ORDER BY priority DESC, created_at ASC
+            """, params).fetchall()
+            
+            return [self._row_to_job(dict(row)) for row in rows]
+    
+    def get_by_status(self, status: str, limit: Optional[int] = None) -> List[Job]:
+        """Get jobs by status with optional limit"""
+        with db.get_connection() as conn:
+            query = """
+                SELECT * FROM jobs 
+                WHERE status = ?
+                ORDER BY created_at DESC
+            """
+            params = [status]
+            
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            rows = conn.execute(query, params).fetchall()
+            return [self._row_to_job(dict(row)) for row in rows]
+    
+    def update_priority(self, job_id: str, priority: int) -> bool:
+        """Update job priority"""
+        with db.get_connection() as conn:
+            conn.execute("""
+                UPDATE jobs SET priority = ? WHERE job_id = ?
+            """, (priority, job_id))
+        return True
+    
+    def count_all(
+        self,
+        job_type: Optional[str] = None,
+        status: Optional[str] = None,
+        model_key: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> int:
+        """Count jobs with optional filters"""
+        with db.get_connection() as conn:
+            conditions = []
+            params = []
+            
+            if job_type:
+                conditions.append("job_type = ?")
+                params.append(job_type)
+            
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            
+            if model_key:
+                conditions.append("model_key = ?")
+                params.append(model_key)
+            
+            if user_id:
+                conditions.append("user_id = ?")
+                params.append(user_id)
+            
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            
+            row = conn.execute(f"""
+                SELECT COUNT(*) as count FROM jobs WHERE {where_clause}
+            """, params).fetchone()
+            
+            return row['count'] if row else 0
 
 
 # Backward compatibility alias
@@ -687,7 +770,8 @@ class EventRepository:
         event_type: Optional[str] = None,
         status: Optional[str] = None,
         model_key: Optional[str] = None,
-        client_ip: Optional[str] = None
+        client_ip: Optional[str] = None,
+        source: Optional[str] = None
     ) -> List[Event]:
         """Get all events with optional filters"""
         with db.get_connection() as conn:
@@ -709,6 +793,10 @@ class EventRepository:
             if client_ip:
                 conditions.append("client_ip = ?")
                 params.append(client_ip)
+            
+            if source:
+                conditions.append("source = ?")
+                params.append(source)
             
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             params.extend([limit, offset])
@@ -833,19 +921,53 @@ class EventRepository:
 class ApiTokenRepository:
     """Repository for API tokens"""
     
+    def _execute_with_retry(self, operation, *args, max_retries=10, retry_delay=0.05):
+        """Execute a database operation with retry logic for database locks"""
+        for attempt in range(max_retries):
+            try:
+                return operation(*args)
+            except sqlite3.OperationalError as e:
+                error_msg = str(e).lower()
+                if "database is locked" in error_msg and attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    wait_time = retry_delay * (2 ** attempt) + (time.time() % 0.01)
+                    wait_time = min(wait_time, 1.0)  # Cap at 1 second
+                    logger.warning(f"Database locked, retrying in {wait_time:.3f}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # Don't retry on other OperationalError (like FOREIGN KEY constraint)
+                    logger.error(f"Database operation failed: {e}")
+                    raise
+            except sqlite3.IntegrityError as e:
+                # Don't retry on integrity errors (FOREIGN KEY, UNIQUE, etc.)
+                logger.error(f"Database integrity error: {e}")
+                raise
+            except Exception as e:
+                # Re-raise non-database exceptions immediately
+                logger.error(f"Database operation failed with unexpected error: {e}")
+                raise
+    
     def create(self, token: ApiToken) -> ApiToken:
-        """Create a new API token"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                INSERT INTO api_tokens (
-                    token_id, token_hash, user_id, token_type, name,
-                    created_at, expires_at, last_used_at, is_active
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                token.token_id, token.token_hash, token.user_id, token.token_type, token.name,
-                token.created_at or datetime.now(), token.expires_at, token.last_used_at, token.is_active
-            ))
-        return token
+        """Create a new API token with retry logic for database locks"""
+        def _create():
+            with db.get_connection() as conn:
+                # Use BEGIN IMMEDIATE to acquire write lock immediately
+                # This helps prevent database locked errors in concurrent scenarios
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("""
+                    INSERT INTO api_tokens (
+                        token_id, token_hash, user_id, token_type, name,
+                        created_at, expires_at, last_used_at, is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    token.token_id, token.token_hash, token.user_id, token.token_type, token.name,
+                    token.created_at or datetime.now(), token.expires_at, token.last_used_at, token.is_active
+                ))
+                # Commit is handled by context manager's __exit__
+            return token
+        
+        return self._execute_with_retry(_create)
     
     def get_by_hash(self, token_hash: str) -> Optional[ApiToken]:
         """Get token by hash for validation"""
@@ -937,190 +1059,57 @@ class ApiTokenRepository:
     
     def revoke(self, token_id: str) -> bool:
         """Revoke a token (set is_active = 0)"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 WHERE token_id = ?
-            """, (token_id,))
-        return True
+        def _revoke():
+            with db.get_connection() as conn:
+                conn.execute("""
+                    UPDATE api_tokens SET is_active = 0 WHERE token_id = ?
+                """, (token_id,))
+            return True
+        
+        return self._execute_with_retry(_revoke)
     
     def delete(self, token_id: str) -> bool:
         """Delete a token"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                DELETE FROM api_tokens WHERE token_id = ?
-            """, (token_id,))
-        return True
+        def _delete():
+            with db.get_connection() as conn:
+                conn.execute("""
+                    DELETE FROM api_tokens WHERE token_id = ?
+                """, (token_id,))
+            return True
+        
+        return self._execute_with_retry(_delete)
     
     def update_last_used(self, token_id: str) -> bool:
         """Update last_used_at timestamp"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET last_used_at = ? WHERE token_id = ?
-            """, (datetime.now(), token_id))
-        return True
+        def _update():
+            with db.get_connection() as conn:
+                conn.execute("""
+                    UPDATE api_tokens SET last_used_at = ? WHERE token_id = ?
+                """, (datetime.now(), token_id))
+            return True
+        
+        return self._execute_with_retry(_update)
     
     def revoke_all_sessions(self, user_id: str) -> bool:
         """Revoke all session tokens for a user"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 
-                WHERE user_id = ? AND token_type = 'session'
-            """, (user_id,))
-        return True
+        def _revoke_all():
+            with db.get_connection() as conn:
+                conn.execute("""
+                    UPDATE api_tokens SET is_active = 0 
+                    WHERE user_id = ? AND token_type = 'session'
+                """, (user_id,))
+            return True
+        
+        return self._execute_with_retry(_revoke_all)
     
     def revoke_all_tokens(self, user_id: str) -> bool:
         """Revoke all tokens (sessions and API) for a user"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 
-                WHERE user_id = ?
-            """, (user_id,))
-        return True
-
-
-class ApiTokenRepository:
-    """Repository for API tokens"""
-    
-    def create(self, token: ApiToken) -> ApiToken:
-        """Create a new API token"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                INSERT INTO api_tokens (
-                    token_id, token_hash, user_id, token_type, name,
-                    created_at, expires_at, last_used_at, is_active
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                token.token_id, token.token_hash, token.user_id, token.token_type, token.name,
-                token.created_at or datetime.now(), token.expires_at, token.last_used_at, token.is_active
-            ))
-        return token
-    
-    def get_by_hash(self, token_hash: str) -> Optional[ApiToken]:
-        """Get token by hash for validation"""
-        with db.get_connection() as conn:
-            row = conn.execute("""
-                SELECT * FROM api_tokens WHERE token_hash = ? AND is_active = 1
-            """, (token_hash,)).fetchone()
-            
-            if row:
-                # Check if token is expired
-                if row['expires_at']:
-                    expires_at = parse_date(row['expires_at'])
-                    if expires_at < datetime.now():
-                        return None
-                
-                return ApiToken(
-                    token_id=row['token_id'],
-                    token_hash=row['token_hash'],
-                    user_id=row['user_id'],
-                    token_type=row['token_type'],
-                    name=row['name'],
-                    created_at=parse_date(row['created_at']) if row['created_at'] else None,
-                    expires_at=parse_date(row['expires_at']) if row['expires_at'] else None,
-                    last_used_at=parse_date(row['last_used_at']) if row['last_used_at'] else None,
-                    is_active=row['is_active']
-                )
-            return None
-    
-    def get_by_user(self, user_id: str, token_type: Optional[str] = None) -> List[ApiToken]:
-        """Get all tokens for a user, optionally filtered by type"""
-        with db.get_connection() as conn:
-            if token_type:
-                rows = conn.execute("""
-                    SELECT * FROM api_tokens 
-                    WHERE user_id = ? AND token_type = ?
-                    ORDER BY created_at DESC
-                """, (user_id, token_type)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM api_tokens 
+        def _revoke_all():
+            with db.get_connection() as conn:
+                conn.execute("""
+                    UPDATE api_tokens SET is_active = 0 
                     WHERE user_id = ?
-                    ORDER BY created_at DESC
-                """, (user_id,)).fetchall()
-            
-            return [
-                ApiToken(
-                    token_id=row['token_id'],
-                    token_hash=row['token_hash'],
-                    user_id=row['user_id'],
-                    token_type=row['token_type'],
-                    name=row['name'],
-                    created_at=parse_date(row['created_at']) if row['created_at'] else None,
-                    expires_at=parse_date(row['expires_at']) if row['expires_at'] else None,
-                    last_used_at=parse_date(row['last_used_at']) if row['last_used_at'] else None,
-                    is_active=row['is_active']
-                )
-                for row in rows
-            ]
-    
-    def get_all(self, token_type: Optional[str] = None) -> List[ApiToken]:
-        """Get all tokens, optionally filtered by type"""
-        with db.get_connection() as conn:
-            if token_type:
-                rows = conn.execute("""
-                    SELECT * FROM api_tokens 
-                    WHERE token_type = ?
-                    ORDER BY created_at DESC
-                """, (token_type,)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM api_tokens 
-                    ORDER BY created_at DESC
-                """).fetchall()
-            
-            return [
-                ApiToken(
-                    token_id=row['token_id'],
-                    token_hash=row['token_hash'],
-                    user_id=row['user_id'],
-                    token_type=row['token_type'],
-                    name=row['name'],
-                    created_at=parse_date(row['created_at']) if row['created_at'] else None,
-                    expires_at=parse_date(row['expires_at']) if row['expires_at'] else None,
-                    last_used_at=parse_date(row['last_used_at']) if row['last_used_at'] else None,
-                    is_active=row['is_active']
-                )
-                for row in rows
-            ]
-    
-    def revoke(self, token_id: str) -> bool:
-        """Revoke a token (set is_active = 0)"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 WHERE token_id = ?
-            """, (token_id,))
-        return True
-    
-    def delete(self, token_id: str) -> bool:
-        """Delete a token"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                DELETE FROM api_tokens WHERE token_id = ?
-            """, (token_id,))
-        return True
-    
-    def update_last_used(self, token_id: str) -> bool:
-        """Update last_used_at timestamp"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET last_used_at = ? WHERE token_id = ?
-            """, (datetime.now(), token_id))
-        return True
-    
-    def revoke_all_sessions(self, user_id: str) -> bool:
-        """Revoke all session tokens for a user"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 
-                WHERE user_id = ? AND token_type = 'session'
-            """, (user_id,))
-        return True
-    
-    def revoke_all_tokens(self, user_id: str) -> bool:
-        """Revoke all tokens (sessions and API) for a user"""
-        with db.get_connection() as conn:
-            conn.execute("""
-                UPDATE api_tokens SET is_active = 0 
-                WHERE user_id = ?
-            """, (user_id,))
-        return True
+                """, (user_id,))
+            return True
+        
+        return self._execute_with_retry(_revoke_all)

@@ -19,9 +19,12 @@ import JobsTab from './JobsTab';
 import TrainingTab from './TrainingTab';
 import PredictTab from './PredictTab';
 import ModelsTab from './ModelsTab';
+import UsersTab from './UsersTab';
+import ProfileTab from './ProfileTab';
+import AboutTab from './AboutTab';
 import styles from './Dashboard.module.css';
 
-type TabType = 'overview' | 'models' | 'predict' | 'jobs' | 'events' | 'training';
+type TabType = 'overview' | 'models' | 'predict' | 'jobs' | 'events' | 'training' | 'users' | 'profile' | 'about';
 
 export default function Dashboard() {
   const { state, dispatch } = useAppStore();
@@ -57,6 +60,18 @@ export default function Dashboard() {
 
           {activeTab === 'events' && (
             <EventsTab />
+          )}
+
+          {activeTab === 'users' && (
+            <UsersTab />
+          )}
+
+          {activeTab === 'profile' && (
+            <ProfileTab />
+          )}
+
+          {activeTab === 'about' && (
+            <AboutTab />
           )}
           
           {state.isLoading && (

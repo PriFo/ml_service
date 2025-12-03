@@ -1,6 +1,91 @@
 // API client using Fetch API
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8085';
-const WS_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:8085/ws';
+// Auto-detect protocol (http/https) based on current page protocol
+function getApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    // Use environment variable if set
+    const envUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (envUrl) {
+      // If URL is relative, use current protocol
+      if (envUrl.startsWith('/') || envUrl.startsWith('./')) {
+        return `${window.location.protocol}//${window.location.host}${envUrl}`;
+      }
+      // If URL is absolute but doesn't have protocol, use current protocol
+      if (envUrl.startsWith('//')) {
+        return `${window.location.protocol}${envUrl}`;
+      }
+      return envUrl;
+    }
+    
+    // Auto-detect: use same protocol as current page
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    
+    // Determine backend port
+    let port = '';
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      // Local development: use standard backend port
+      port = ':8085';
+    } else {
+      // External access: try to detect from current port or use default backend port
+      // If current port is 6565 (frontend), use 8085 (backend)
+      // Otherwise, assume backend is on same port as frontend (proxy scenario)
+      const currentPort = window.location.port;
+      if (currentPort === '6565' || currentPort === '') {
+        port = ':8085';
+      } else {
+        // If using proxy or different setup, backend might be on same port
+        port = currentPort ? `:${currentPort}` : '';
+      }
+    }
+    
+    return `${protocol}//${hostname}${port}`;
+  }
+  // Server-side: use default
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8085';
+}
+
+function getWsUrl(): string {
+  if (typeof window !== 'undefined') {
+    const envUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL;
+    if (envUrl) {
+      // If URL is relative, use current protocol (ws/wss)
+      if (envUrl.startsWith('/') || envUrl.startsWith('./')) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}${envUrl}`;
+      }
+      // If URL is absolute but doesn't have protocol, use current protocol
+      if (envUrl.startsWith('//')) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}${envUrl}`;
+      }
+      return envUrl;
+    }
+    
+    // Auto-detect: use same protocol as current page (ws/wss)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const hostname = window.location.hostname;
+    
+    // Determine backend port (same logic as HTTP API)
+    let port = '';
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      port = ':8085';
+    } else {
+      const currentPort = window.location.port;
+      if (currentPort === '6565' || currentPort === '') {
+        port = ':8085';
+      } else {
+        port = currentPort ? `:${currentPort}` : '';
+      }
+    }
+    
+    return `${protocol}//${hostname}${port}/ws`;
+  }
+  // Server-side: use default
+  return process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:8085/ws';
+}
+
+const API_URL = getApiUrl();
+const WS_URL = getWsUrl();
 
 interface RequestOptions {
   method?: string;
@@ -34,6 +119,17 @@ async function httpRequest<T>(
     const isJson = contentType && contentType.includes('application/json');
 
     if (!response.ok) {
+      // Special handling for 401 Unauthorized
+      if (response.status === 401) {
+        // Clear invalid token from storage
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('api_token');
+          localStorage.removeItem('api_token');
+          sessionStorage.removeItem('user_tier');
+          localStorage.removeItem('user_tier');
+        }
+      }
+      
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
       if (isJson) {
         try {
@@ -55,7 +151,11 @@ async function httpRequest<T>(
           // Use default error message
         }
       }
-      throw new Error(errorMessage);
+      
+      // Create error with status code for easier checking
+      const error = new Error(errorMessage) as Error & { status?: number };
+      error.status = response.status;
+      throw error;
     }
 
     // Only parse as JSON if content-type is JSON
@@ -185,6 +285,17 @@ export const api = {
     return httpRequest(`/jobs/${jobId}/cancel`, { method: 'POST' });
   },
 
+  listJobs: (params?: { job_type?: string; status?: string; model_key?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.job_type) query.append('job_type', params.job_type);
+    if (params?.status) query.append('status', params.status);
+    if (params?.model_key) query.append('model_key', params.model_key);
+    if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.offset) query.append('offset', params.offset.toString());
+    const endpoint = query.toString() ? `/jobs?${query}` : '/jobs';
+    return httpRequest<{ jobs: any[]; total: number }>(endpoint);
+  },
+
   // Scheduler & Queue
   getSchedulerStats: () => {
     return httpRequest('/scheduler/stats');
@@ -209,6 +320,74 @@ export const api = {
   }),
 
   getUserInfo: () => httpRequest<{ tier: string; username: string; authenticated: boolean }>('/auth/user-info'),
+
+  // User management (admin only)
+  getUsers: (tier?: string, isActive?: boolean) => {
+    const params = new URLSearchParams();
+    if (tier) params.append('tier', tier);
+    if (isActive !== undefined) params.append('is_active', String(isActive));
+    const query = params.toString();
+    return httpRequest<{ users: Array<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null; is_active: boolean }>; total: number }>(`/auth/users${query ? `?${query}` : ''}`);
+  },
+
+  getUser: (userId: string) => httpRequest<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null; is_active: boolean }>(`/auth/users/${userId}`),
+
+  createUser: (username: string, password: string, tier: string) => httpRequest<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null; is_active: boolean }>('/auth/users', {
+    method: 'POST',
+    body: { username, password, tier },
+  }),
+
+  updateUser: (userId: string, tier?: string, isActive?: boolean) => {
+    const body: any = {};
+    if (tier !== undefined) body.tier = tier;
+    if (isActive !== undefined) body.is_active = isActive;
+    return httpRequest<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null; is_active: boolean }>(`/auth/users/${userId}`, {
+      method: 'PUT',
+      body,
+    });
+  },
+
+  deleteUser: (userId: string) => httpRequest<{ status: string; message: string }>(`/auth/users/${userId}`, {
+    method: 'DELETE',
+  }),
+
+  // Profile management
+  getProfile: () => httpRequest<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null }>('/auth/profile'),
+
+  changePassword: (currentPassword: string, newPassword: string) => httpRequest<{ status: string; message: string }>('/auth/profile/password', {
+    method: 'PUT',
+    body: { current_password: currentPassword, new_password: newPassword },
+  }),
+
+  changeUsername: (newUsername: string) => httpRequest<{ user_id: string; username: string; tier: string; created_at: string; last_login: string | null }>('/auth/profile/username', {
+    method: 'PUT',
+    body: { new_username: newUsername },
+  }),
+
+  deleteProfile: () => httpRequest<{ status: string; message: string }>('/auth/profile', {
+    method: 'DELETE',
+  }),
+
+  // API Tokens
+  createToken: (name?: string) => httpRequest<{ token: string; token_id: string; created_at: string; expires_at: string; permissions: any }>('/auth/tokens', {
+    method: 'POST',
+    body: { name: name || undefined },
+  }),
+
+  getTokens: (tokenType?: string) => {
+    const params = new URLSearchParams();
+    if (tokenType) params.append('token_type', tokenType);
+    const query = params.toString();
+    return httpRequest<{ tokens: Array<{ token_id: string; name: string | null; token_type: string; created_at: string; last_used_at: string | null; expires_at: string | null; is_active: boolean }> }>(`/auth/tokens${query ? `?${query}` : ''}`);
+  },
+
+  revokeToken: (tokenId: string) => httpRequest<{ status: string; message: string }>(`/auth/tokens/${tokenId}/revoke`, {
+    method: 'POST',
+  }),
+
+  deleteToken: (tokenId: string) => httpRequest<{ status: string; message: string }>(`/auth/tokens/${tokenId}`, {
+    method: 'DELETE',
+  }),
 };
 
 // WebSocket client

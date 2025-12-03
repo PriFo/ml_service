@@ -69,3 +69,17 @@ htmlcov/
 
 # Old service directory
 ml_service_old/
+ТехническоеЗадание/
+git_helper/
+AIText/
+
+# SSL Certificates (never commit private keys!)
+ssl/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+*.jks
+openssl.conf

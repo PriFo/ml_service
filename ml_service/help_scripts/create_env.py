@@ -54,6 +54,13 @@ ML_ADMIN_PASSWORD=admin
 
 # Session expiration (в днях)
 ML_SESSION_EXPIRY_DAYS=30
+
+# SSL/HTTPS Configuration (для внешних подключений)
+# Для включения HTTPS установите ML_USE_HTTPS=true и укажите пути к сертификатам
+ML_USE_HTTPS=false
+ML_SSL_CERT_FILE=./ssl/cert.pem
+ML_SSL_KEY_FILE=./ssl/key.pem
+ML_TRUST_PROXY=true
 """
 
 def create_env():

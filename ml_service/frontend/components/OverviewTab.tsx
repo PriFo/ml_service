@@ -6,22 +6,33 @@ import { api } from '@/lib/api';
 import styles from './OverviewTab.module.css';
 
 export default function OverviewTab() {
-  const { state } = useAppStore();
+  const { state, dispatch } = useAppStore();
   const [stats, setStats] = useState<any>(null);
   const [models, setModels] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Determine if user is admin based on tier
-  const isAdmin = state.userTier === 'admin';
+  const isAdmin = state.userTier === 'admin' || state.userTier === 'system_admin';
 
   useEffect(() => {
+    // Only load data if user is authenticated
+    if (!state.isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
     loadData();
     const interval = setInterval(loadData, 10000); // Update every 10 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [state.isAuthenticated]);
 
   const loadData = async () => {
+    // Don't load if not authenticated
+    if (!state.isAuthenticated) {
+      return;
+    }
+
     try {
       const [statsData, modelsData, jobsData] = await Promise.all([
         api.getSchedulerStats(),
@@ -31,8 +42,25 @@ export default function OverviewTab() {
       setStats(statsData);
       setModels(modelsData.models || []);
       setJobs(jobsData.jobs || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load data:', error);
+      
+      // Check if it's a 401 error - token expired or invalid
+      const isUnauthorized = error.status === 401 || 
+                            error.message?.includes('401') || 
+                            error.message?.includes('Unauthorized') ||
+                            error.message?.includes('Invalid or expired authentication token') ||
+                            error.message?.includes('Missing authentication token');
+      
+      if (isUnauthorized) {
+        // Token expired or invalid - logout and redirect to login
+        dispatch({ type: 'LOGOUT' });
+        // Reload page to reset all state
+        if (typeof window !== 'undefined') {
+          window.location.href = '/';
+        }
+        return;
+      }
     } finally {
       setLoading(false);
     }

@@ -39,6 +39,7 @@ from ml_service.db.models import PredictionLog, Event, Job
 from ml_service.ml.model import MLModel
 from ml_service.ml.validators import DataValidator
 from ml_service.core.config import settings
+from ml_service.core.config import settings
 from ml_service.core.request_source import (
     detect_request_source, get_client_ip, get_user_agent,
     parse_user_agent, get_user_system_info, calculate_data_size
@@ -205,6 +206,158 @@ async def process_training_job(job_id: str, request: TrainingRequest, event_id: 
         
     except Exception as e:
         logger.error(f"Training job {job_id} failed: {e}", exc_info=True)
+        error_msg = str(e)
+        # Truncate very long error messages
+        if len(error_msg) > 1000:
+            error_msg = error_msg[:1000] + "... (truncated)"
+        job_repo.update_status(job_id, "failed", error_message=error_msg, stage="failed")
+        if event_repo and event_id:
+            event_repo.update_status(
+                event_id,
+                "failed",
+                stage="failed",
+                error_message=error_msg
+            )
+        # Don't re-raise to prevent background task from crashing
+
+
+async def process_retrain_job(job_id: str, request: RetrainingRequest, event_id: Optional[str] = None):
+    """Background task to process retraining job"""
+    job_repo = JobRepository()
+    model_repo = ModelRepository()
+    event_repo = EventRepository() if event_id else None
+    
+    try:
+        logger.info(f"Starting retraining job {job_id} for model {request.model_key} from v{request.base_version} to v{request.new_version}")
+        # Update status to running
+        job_repo.update_status(job_id, "running", stage="loading_base_model")
+        if event_repo and event_id:
+            event_repo.update_status(event_id, "running", stage="loading_base_model")
+        
+        # Load base model
+        base_model = model_repo.get(request.model_key, request.base_version)
+        if not base_model:
+            raise ValueError(f"Base model {request.model_key} v{request.base_version} not found")
+        
+        # Validate data before retraining
+        if not request.items or len(request.items) == 0:
+            raise ValueError("Retraining data is empty. Please provide at least one item.")
+        
+        # Check if all required fields exist in the data
+        sample_item = request.items[0]
+        available_fields = set(sample_item.keys())
+        
+        # Check target field
+        if request.target_field not in available_fields:
+            raise ValueError(
+                f"Target field '{request.target_field}' not found in data. "
+                f"Available fields: {', '.join(sorted(available_fields))}"
+            )
+        
+        # Auto-detect feature fields if not provided
+        if request.feature_fields is None or len(request.feature_fields) == 0:
+            # Use all fields except target_field as features
+            feature_fields = [f for f in available_fields if f != request.target_field]
+            if len(feature_fields) == 0:
+                raise ValueError(
+                    f"No feature fields available. Target field '{request.target_field}' is the only field in data. "
+                    f"Please provide at least one additional field for features."
+                )
+            logger.info(f"Auto-detected feature fields: {feature_fields}")
+            # Update request object to include auto-detected fields
+            request.feature_fields = feature_fields
+        else:
+            # Validate provided feature fields
+            missing_features = [f for f in request.feature_fields if f not in available_fields]
+            if missing_features:
+                raise ValueError(
+                    f"Feature fields not found in data: {', '.join(missing_features)}. "
+                    f"Available fields: {', '.join(sorted(available_fields))}"
+                )
+        
+        # Update status to retraining
+        job_repo.update_status(job_id, "running", stage="retraining")
+        if event_repo and event_id:
+            event_repo.update_status(event_id, "running", stage="retraining")
+        
+        # Create new model instance for the new version
+        features_config = {
+            "feature_fields": request.feature_fields,
+            "target_field": request.target_field
+        }
+        
+        new_model = MLModel(
+            model_key=request.model_key,
+            version=request.new_version,
+            features_config=features_config
+        )
+        
+        # Load base model to potentially reuse some configurations
+        # For now, we'll train from scratch with new data
+        # In the future, we could implement incremental learning
+        base_model_ml = MLModel(
+            model_key=request.model_key,
+            version=request.base_version,
+            features_config=features_config
+        )
+        
+        # Try to load base model to verify it exists
+        try:
+            base_model_ml._load_model()
+            logger.info(f"Base model {request.model_key} v{request.base_version} loaded successfully")
+        except Exception as e:
+            logger.warning(f"Could not load base model: {e}. Training new model from scratch.")
+        
+        # Prepare training data
+        training_data = request.items
+        
+        # If data_mode is "append", we could merge with existing data
+        # For now, we'll use only new data as implementing append would require
+        # storing original training data, which is not currently available
+        if request.data_mode == "append":
+            logger.info("Data mode is 'append', but original training data is not stored. Using only new data.")
+        
+        # Train new model
+        metrics = new_model.train(
+            items=training_data,
+            target_field=request.target_field,
+            feature_fields=request.feature_fields,
+            validation_split=request.validation_split,
+            use_gpu=request.use_gpu_if_available
+        )
+        
+        # Save new model to database
+        db_model = Model(
+            model_key=request.model_key,
+            version=request.new_version,
+            status="active",
+            accuracy=metrics.get("validation_accuracy"),
+            created_at=datetime.now(),
+            last_trained=datetime.now(),
+            task_type=base_model.task_type,  # Inherit task type from base model
+            target_field=request.target_field,
+            feature_fields=str(request.feature_fields)
+        )
+        model_repo.create(db_model)
+        
+        # Update job status
+        job_repo.update_status(job_id, "completed", metrics=metrics, stage="completed")
+        if event_repo and event_id:
+            event_repo.update_status(
+                event_id, 
+                "completed", 
+                stage="completed",
+                output_data=json.dumps({
+                    "base_version": request.base_version,
+                    "new_version": request.new_version,
+                    "metrics": metrics
+                })
+            )
+        
+        logger.info(f"Retraining job {job_id} completed successfully. New model: {request.model_key} v{request.new_version}")
+        
+    except Exception as e:
+        logger.error(f"Retraining job {job_id} failed: {e}", exc_info=True)
         error_msg = str(e)
         # Truncate very long error messages
         if len(error_msg) > 1000:
@@ -481,6 +634,128 @@ async def train_model(
         )
 
 
+@router.post("/retrain")
+async def retrain_model(
+    request: RetrainingRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request,
+    user: dict = AuthDep
+):
+    """
+    Start retraining a model (async).
+    Access: Admin and system_admin only.
+    """
+    # Check admin rights
+    if user.get("tier") not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    try:
+        job_id = str(uuid.uuid4())
+        
+        # Get request metadata
+        source = detect_request_source(http_request)
+        client_ip = get_client_ip(http_request)
+        user_agent = get_user_agent(http_request)
+        
+        # Verify base model exists
+        model_repo = ModelRepository()
+        base_model = model_repo.get(request.model_key, request.base_version)
+        if not base_model:
+            raise HTTPException(status_code=404, detail="Base model not found")
+        
+        # Parse user agent for OS and device
+        ua_info = parse_user_agent(user_agent)
+        system_info = get_user_system_info(http_request)
+        
+        # Get user info from auth
+        user_id = user.get("user_id") if user else None
+        user_tier = user.get("tier", "user") if user else "user"
+        
+        # Calculate data size
+        request_data = {
+            "model_key": request.model_key,
+            "base_version": request.base_version,
+            "new_version": request.new_version,
+            "data_mode": request.data_mode,
+            "items": request.items,
+            "feature_fields": request.feature_fields,
+            "target_field": request.target_field
+        }
+        data_size_bytes = calculate_data_size(request_data)
+        
+        # Create job with all metadata
+        job = Job(
+            job_id=job_id,
+            model_key=request.model_key,
+            job_type="retrain",
+            status="queued",
+            stage="queued",
+            source=source,
+            dataset_size=len(request.items),
+            created_at=datetime.now(),
+            client_ip=client_ip,
+            user_agent=user_agent,
+            priority=5,  # Will be recalculated by priority queue
+            user_tier=user_tier,
+            data_size_bytes=data_size_bytes,
+            progress_current=0,
+            progress_total=100,
+            model_version=request.new_version,
+            request_payload=json.dumps(request_data),
+            user_os=ua_info.get("os"),
+            user_device=ua_info.get("device"),
+            user_cpu_cores=system_info.get("cpu_cores"),
+            user_ram_gb=system_info.get("ram_gb"),
+            user_gpu=system_info.get("gpu"),
+            user_id=user_id
+        )
+        
+        job_repo = JobRepository()
+        job_repo.create(job)
+        
+        # Log event
+        event_repo = EventRepository()
+        event = Event(
+            event_id=str(uuid.uuid4()),
+            event_type="retrain",
+            source=source,
+            model_key=request.model_key,
+            status="queued",
+            stage="queued",
+            input_data=json.dumps({
+                "model_key": request.model_key,
+                "base_version": request.base_version,
+                "new_version": request.new_version,
+                "data_mode": request.data_mode,
+                "items_count": len(request.items)
+            }),
+            client_ip=client_ip,
+            user_agent=user_agent,
+            created_at=datetime.now()
+        )
+        event_repo.create(event)
+        
+        # Start background task to process retraining
+        background_tasks.add_task(process_retrain_job, job_id, request, event.event_id)
+        
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "model_key": request.model_key,
+            "base_version": request.base_version,
+            "new_version": request.new_version,
+            "estimated_time": 0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting retraining job: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start retraining job: {str(e)}"
+        )
+
+
 @router.post("/predict", response_model=PredictionJobResponse)
 async def predict(
     request: PredictionRequest,
@@ -691,9 +966,8 @@ async def retrain_model(
         )
         event_repo.create(event)
         
-        # Note: Background task will be handled by scheduler/worker pool
-        # For now, we'll create a placeholder retrain function
-        # background_tasks.add_task(process_retrain_job, job_id, request, event.event_id)
+        # Start background task to process retraining
+        background_tasks.add_task(process_retrain_job, job_id, request, event.event_id)
         
         return {
             "job_id": job_id,
@@ -765,7 +1039,7 @@ async def get_jobs(
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str, user: dict = AuthDep):
     """
-    Get job details by ID.
+    Get job details by ID with queue position and estimated wait time.
     For user: only own jobs.
     For admin/system_admin: all jobs.
     """
@@ -782,7 +1056,8 @@ async def get_job(job_id: str, user: dict = AuthDep):
     if user_tier == "user" and job.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied. Can only view own jobs.")
     
-    return {
+    # Build job dict with all fields
+    job_dict = {
         "job_id": job.job_id,
         "model_key": job.model_key,
         "job_type": job.job_type,
@@ -793,8 +1068,36 @@ async def get_job(job_id: str, user: dict = AuthDep):
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         "dataset_size": job.dataset_size,
         "metrics": json.loads(job.metrics) if job.metrics else None,
-        "error_message": job.error_message
+        "error_message": job.error_message,
+        "progress_current": job.progress_current,
+        "progress_total": job.progress_total,
+        "priority": job.priority,
+        "user_id": job.user_id
     }
+    
+    # Calculate queue position if queued
+    queue_position = None
+    estimated_wait_time = None
+    
+    if job.status == "queued":
+        queued_jobs = job_repo.get_queued_jobs(model_key=job.model_key)
+        # Sort by priority DESC, then created_at ASC
+        queued_jobs.sort(key=lambda j: (-j.priority, j.created_at or datetime.min))
+        
+        for idx, queued_job in enumerate(queued_jobs, 1):
+            if queued_job.job_id == job_id:
+                queue_position = idx
+                break
+        
+        # Estimate wait time: average time per job * position
+        # Rough estimate: 1 minute per job
+        if queue_position:
+            estimated_wait_time = queue_position * 60  # seconds
+    
+    job_dict["queue_position"] = queue_position
+    job_dict["estimated_wait_time"] = estimated_wait_time
+    
+    return job_dict
 
 
 @router.get("/predict/{job_id}", response_model=PredictionResultResponse)
@@ -1380,70 +1683,6 @@ async def get_events_by_ip(
     return EventsResponse(events=event_infos)
 
 
-@router.get("/jobs/{job_id}")
-async def get_job_status(job_id: str, user: dict = AuthDep):
-    """Get job status with queue position and estimated wait time"""
-    job_repo = JobRepository()
-    job = job_repo.get(job_id)
-    
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    # Convert to dict with all fields
-    job_dict = job_repo.to_dict(job)
-    
-    # Calculate queue position if queued
-    queue_position = None
-    estimated_wait_time = None
-    
-    if job.status == "queued":
-        queued_jobs = job_repo.get_queued_jobs(model_key=job.model_key)
-        # Sort by priority DESC, then created_at ASC
-        queued_jobs.sort(key=lambda j: (-j.priority, j.created_at or datetime.min))
-        
-        for idx, queued_job in enumerate(queued_jobs, 1):
-            if queued_job.job_id == job_id:
-                queue_position = idx
-                break
-        
-        # Estimate wait time: average time per job * position
-        # Rough estimate: 1 minute per job
-        if queue_position:
-            estimated_wait_time = queue_position * 60  # seconds
-    
-    job_dict["queue_position"] = queue_position
-    job_dict["estimated_wait_time"] = estimated_wait_time
-    
-    return job_dict
-
-
-@router.get("/jobs")
-async def list_jobs(
-    model_key: Optional[str] = None,
-    status: Optional[str] = None,
-    job_type: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
-    user: dict = AuthDep
-):
-    """List jobs with filtering and pagination"""
-    job_repo = JobRepository()
-    jobs = job_repo.get_all(limit=limit, offset=offset, job_type=job_type, status=status, model_key=model_key)
-    
-    # Convert to dicts
-    job_dicts = [job_repo.to_dict(job) for job in jobs]
-    
-    # Get total count for pagination
-    total = len(job_dicts)  # Simplified, should query count separately for accuracy
-    
-    return {
-        "jobs": job_dicts,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
-
-
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str, user: dict = AuthDep):
     """Cancel a job"""
@@ -1494,7 +1733,23 @@ async def get_next_job(
         return {"job": None}
     
     job_repo = JobRepository()
-    return {"job": job_repo.to_dict(job)}
+    job_dict = {
+        "job_id": job.job_id,
+        "model_key": job.model_key,
+        "job_type": job.job_type,
+        "status": job.status,
+        "stage": job.stage,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "dataset_size": job.dataset_size,
+        "metrics": json.loads(job.metrics) if job.metrics else None,
+        "error_message": job.error_message,
+        "progress_current": job.progress_current,
+        "progress_total": job.progress_total,
+        "priority": job.priority
+    }
+    return {"job": job_dict}
 
 
 # Scheduler endpoints
@@ -1976,11 +2231,31 @@ async def get_profile(user: dict = AuthDep):
     from dateutil.parser import parse as parse_date
     
     user_id = user.get("user_id")
+    username = user.get("username")
     
     with db.get_connection() as conn:
-        user_row = conn.execute("""
-            SELECT * FROM users WHERE user_id = ?
-        """, (user_id,)).fetchone()
+        # Handle system_admin token case (user_id = "system_admin")
+        if user_id == "system_admin":
+            # Find system_admin user by username from settings
+            admin_username = settings.ML_ADMIN_USERNAME
+            user_row = conn.execute("""
+                SELECT * FROM users WHERE username = ? AND tier = 'system_admin'
+            """, (admin_username,)).fetchone()
+            
+            if not user_row:
+                # If system_admin user doesn't exist, return a synthetic profile
+                return UserProfileResponse(
+                    user_id="system_admin",
+                    username=admin_username or "system_admin",
+                    tier="system_admin",
+                    created_at=datetime.now(),
+                    last_login=None
+                )
+        else:
+            # Regular user lookup by user_id
+            user_row = conn.execute("""
+                SELECT * FROM users WHERE user_id = ?
+            """, (user_id,)).fetchone()
         
         if not user_row:
             raise HTTPException(status_code=404, detail="User not found")
@@ -2116,10 +2391,26 @@ async def create_token(request: CreateTokenRequest, user: dict = AuthDep):
     from ml_service.db.models import ApiToken
     from ml_service.core.security import generate_token, hash_token
     from ml_service.core.config import settings
+    from ml_service.db.connection import db
     from dateutil.parser import parse as parse_date
     
     user_id = user.get("user_id")
     user_tier = user.get("tier", "user")
+    
+    # Handle system_admin token case - find real user_id in database
+    if user_id == "system_admin":
+        admin_username = settings.ML_ADMIN_USERNAME
+        with db.get_connection() as conn:
+            user_row = conn.execute("""
+                SELECT user_id FROM users WHERE username = ? AND tier = 'system_admin'
+            """, (admin_username,)).fetchone()
+            if user_row:
+                user_id = user_row['user_id']
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="System admin user not found in database. Please ensure the system admin user exists."
+                )
     
     # Generate token
     token = generate_token()

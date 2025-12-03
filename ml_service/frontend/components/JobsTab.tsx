@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useAppStore } from '@/lib/store';
+import { api } from '@/lib/api';
 import JobCard from './JobCard';
 import styles from './JobsTab.module.css';
 
@@ -14,6 +16,7 @@ interface Job {
 }
 
 export default function JobsTab() {
+  const { state, dispatch } = useAppStore();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filters, setFilters] = useState({
     type: 'all',
@@ -25,52 +28,114 @@ export default function JobsTab() {
   const [selectedJobDetails, setSelectedJobDetails] = useState<Job | null>(null);
 
   useEffect(() => {
+    // Only load if authenticated
+    if (!state.isAuthenticated) {
+      return;
+    }
     loadModels();
-  }, []);
+  }, [state.isAuthenticated]);
 
   useEffect(() => {
+    // Only load if authenticated
+    if (!state.isAuthenticated) {
+      return;
+    }
     loadJobs();
-  }, [filters]);
+  }, [filters, state.isAuthenticated]);
 
   const loadModels = async () => {
+    if (!state.isAuthenticated) {
+      return;
+    }
+
     try {
-      const response = await fetch('/api/models');
-      const data = await response.json();
-      setModels(data.models?.map((m: any) => m.model_key) || []);
-    } catch (error) {
+      const response = await api.getModels();
+      setModels(response.models?.map((m: any) => m.model_key) || []);
+    } catch (error: any) {
       console.error('Failed to load models:', error);
+      
+      // Check if it's a 401 error
+      const isUnauthorized = error.status === 401 || 
+                            error.message?.includes('401') || 
+                            error.message?.includes('Unauthorized') ||
+                            error.message?.includes('Invalid or expired authentication token') ||
+                            error.message?.includes('Missing authentication token');
+      
+      if (isUnauthorized) {
+        dispatch({ type: 'LOGOUT' });
+        if (typeof window !== 'undefined') {
+          window.location.href = '/';
+        }
+      }
     }
   };
 
   const loadJobs = async () => {
+    if (!state.isAuthenticated) {
+      return;
+    }
+
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params: any = { limit: 100 };
       if (filters.type !== 'all') {
-        params.append('job_type', filters.type);
+        params.job_type = filters.type;
       }
       if (filters.status !== 'all') {
-        params.append('status', filters.status);
+        params.status = filters.status;
       }
       if (filters.model !== 'all') {
-        params.append('model_key', filters.model);
+        params.model_key = filters.model;
       }
-      const response = await fetch(`/api/jobs?${params}`);
-      const data = await response.json();
-      setJobs(data.jobs || []);
-    } catch (error) {
+      
+      const response = await api.listJobs(params);
+      setJobs(response.jobs || []);
+    } catch (error: any) {
       console.error('Failed to load jobs:', error);
+      
+      // Check if it's a 401 error
+      const isUnauthorized = error.status === 401 || 
+                            error.message?.includes('401') || 
+                            error.message?.includes('Unauthorized') ||
+                            error.message?.includes('Invalid or expired authentication token') ||
+                            error.message?.includes('Missing authentication token');
+      
+      if (isUnauthorized) {
+        dispatch({ type: 'LOGOUT' });
+        if (typeof window !== 'undefined') {
+          window.location.href = '/';
+        }
+        return;
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleCancel = async (jobId: string) => {
+    if (!state.isAuthenticated) {
+      return;
+    }
+
     try {
-      await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+      await api.cancelJob(jobId);
       loadJobs();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to cancel job:', error);
+      
+      // Check if it's a 401 error
+      const isUnauthorized = error.status === 401 || 
+                            error.message?.includes('401') || 
+                            error.message?.includes('Unauthorized') ||
+                            error.message?.includes('Invalid or expired authentication token') ||
+                            error.message?.includes('Missing authentication token');
+      
+      if (isUnauthorized) {
+        dispatch({ type: 'LOGOUT' });
+        if (typeof window !== 'undefined') {
+          window.location.href = '/';
+        }
+      }
     }
   };
 

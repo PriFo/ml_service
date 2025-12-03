@@ -22,12 +22,9 @@ class DatabaseConnection:
     
     def _init_database(self):
         """Initialize database with schema"""
-        with self.get_connection() as conn:
-            # Enable foreign keys
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA synchronous = NORMAL")
-            conn.commit()
+        # PRAGMA settings are already set in get_connection(), so we just need to ensure DB exists
+        # Connection will be automatically configured when opened
+        pass
     
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -39,6 +36,13 @@ class DatabaseConnection:
         )
         conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
         try:
+            # Ensure WAL mode and optimize for concurrent access
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA foreign_keys = ON")
+            # PRAGMA busy_timeout doesn't support parameterized queries, use direct value
+            busy_timeout_ms = settings.ML_DB_TIMEOUT * 1000  # Convert to milliseconds
+            conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
             yield conn
             conn.commit()
         except Exception:

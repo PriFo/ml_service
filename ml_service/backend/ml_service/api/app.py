@@ -13,6 +13,7 @@ from ml_service.api.deps import AuthDep
 from ml_service.core.config import settings
 from ml_service.db.migrations import run_migrations
 from ml_service.core.daily_scheduler import scheduler as daily_scheduler
+from ml_service.core.proxy_middleware import ProxyHeadersMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ app = FastAPI(
     description="Production-grade ML Platform",
     version="0.9.1"
 )
+
+# Proxy headers middleware (must be first to process X-Forwarded-* headers)
+if settings.ML_TRUST_PROXY:
+    app.add_middleware(ProxyHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -127,8 +132,11 @@ async def startup_event():
         await job_scheduler.start()
         print("Job scheduler started")
     
+    protocol = "https" if settings.ML_USE_HTTPS else "http"
     print("ML Service 0.9.1 started")
-    print(f"API available at http://{settings.ML_SERVICE_HOST}:{settings.ML_SERVICE_PORT}")
+    print(f"API available at {protocol}://{settings.ML_SERVICE_HOST}:{settings.ML_SERVICE_PORT}")
+    if settings.ML_USE_HTTPS:
+        print(f"HTTPS enabled with certificate: {settings.ML_SSL_CERT_FILE}")
 
 
 @app.on_event("shutdown")

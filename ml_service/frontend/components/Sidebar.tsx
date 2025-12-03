@@ -5,7 +5,7 @@ import { useAppStore } from '@/lib/store';
 import ThemeDropdown from './ThemeDropdown';
 import styles from './Sidebar.module.css';
 
-type TabType = 'overview' | 'models' | 'predict' | 'training' | 'jobs' | 'events';
+type TabType = 'overview' | 'models' | 'predict' | 'training' | 'jobs' | 'events' | 'users' | 'profile' | 'about';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -16,6 +16,8 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const { state, dispatch } = useAppStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
+  const isAdmin = state.userTier === 'admin' || state.userTier === 'system_admin';
+
   const menuItems: Array<{ id: TabType; label: string; icon: string }> = [
     { id: 'overview', label: 'Overview', icon: 'dashboard' },
     { id: 'models', label: 'Models', icon: 'model' },
@@ -23,6 +25,9 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'training', label: 'Training', icon: 'training' },
     { id: 'jobs', label: 'Jobs', icon: 'jobs' },
     { id: 'events', label: 'Events', icon: 'events' },
+    ...(isAdmin ? [{ id: 'users' as TabType, label: 'Users', icon: 'users' }] : []),
+    ...(state.isAuthenticated ? [{ id: 'profile' as TabType, label: 'Profile', icon: 'profile' }] : []),
+    { id: 'about', label: 'About', icon: 'about' },
   ];
 
   const handleLogout = () => {
@@ -85,6 +90,9 @@ function getIcon(iconName: string): string {
     training: '🎓',
     jobs: '⚙',
     events: '⚡',
+    users: '👥',
+    profile: '👤',
+    about: 'ℹ',
     logout: '◄',
   };
   return icons[iconName] || '•';
