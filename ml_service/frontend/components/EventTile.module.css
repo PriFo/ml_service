@@ -1,0 +1,44 @@
+.eventTile {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-left: 4px solid;
+  border-radius: 4px;
+  padding: 1rem;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.eventTile:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.eventTile.active {
+  font-weight: 600;
+}
+
+.tileContent {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tileDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tileLabel {
+  flex: 1;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #111827);
+  font-weight: 500;
+}
+
+.tileCount {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+

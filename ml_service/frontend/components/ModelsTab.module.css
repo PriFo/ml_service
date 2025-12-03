@@ -1,0 +1,97 @@
+.modelsTab {
+  display: flex;
+  gap: 1rem;
+  height: 100%;
+}
+
+.panel1,
+.panel2,
+.panel3 {
+  padding: 1rem;
+  background: var(--color-bg-secondary, #ffffff);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.panel1 {
+  width: 20%;
+}
+
+.panel2 {
+  width: 30%;
+}
+
+.panel3 {
+  flex: 1;
+}
+
+.modelItem,
+.versionItem {
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.modelItem:hover,
+.versionItem:hover {
+  background-color: var(--color-bg-primary, #f9fafb);
+}
+
+.modelItem.selected,
+.versionItem.selected {
+  background-color: var(--color-primary-light, #dbeafe);
+  border-color: var(--color-primary, #3b82f6);
+}
+
+.activeBadge {
+  font-size: 0.75rem;
+  color: var(--color-success, #22c55e);
+  margin-left: 0.5rem;
+}
+
+.newButton {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 1rem;
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.metrics {
+  margin-bottom: 1rem;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.actions button {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.actions button:hover {
+  background-color: var(--color-bg-primary, #f9fafb);
+}
+
+.deleteButton {
+  color: #ef4444 !important;
+  border-color: #ef4444 !important;
+}
+
+.deleteButton:hover {
+  background-color: #fee2e2 !important;
+}
+

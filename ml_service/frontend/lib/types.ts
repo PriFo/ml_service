@@ -112,5 +112,6 @@ export interface AppState {
   error: string | null;
   isAuthenticated: boolean;
   userToken: string | null;
+  userTier: string | null; // 'admin' | 'premium' | 'basic' | null
 }
 

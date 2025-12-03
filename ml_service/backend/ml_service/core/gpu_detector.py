@@ -93,4 +93,50 @@ class GPUDetector:
         if cls.should_use_cuml(dataset_size):
             return "cuml"
         return "sklearn"
+    
+    @classmethod
+    def detect_gpu(cls) -> dict:
+        """Detect GPU and return info dict"""
+        gpu_count = cls.detect_available_gpus()
+        if gpu_count == 0:
+            return {"available": False}
+        
+        try:
+            import subprocess
+            import sys
+            
+            is_windows = sys.platform == "win32"
+            subprocess_args = {
+                "args": ["nvidia-smi", "--query-gpu=name,utilization.gpu", "--format=csv,noheader,nounits"],
+                "capture_output": True,
+                "text": True,
+                "timeout": 5
+            }
+            
+            if is_windows and hasattr(subprocess, 'CREATE_NO_WINDOW'):
+                subprocess_args["creationflags"] = subprocess.CREATE_NO_WINDOW
+            
+            result = subprocess.run(**subprocess_args)
+            if result.returncode == 0 and result.stdout:
+                lines = result.stdout.strip().split("\n")
+                if lines:
+                    # Parse first GPU info
+                    parts = lines[0].split(", ")
+                    gpu_name = parts[0].strip() if len(parts) > 0 else "Unknown GPU"
+                    gpu_usage = float(parts[1].strip()) if len(parts) > 1 and parts[1].strip().isdigit() else None
+                    return {
+                        "available": True,
+                        "name": gpu_name,
+                        "usage_percent": gpu_usage,
+                        "count": gpu_count
+                    }
+        except Exception as e:
+            logger.debug(f"Failed to get GPU details: {e}")
+        
+        return {
+            "available": True,
+            "name": "GPU",
+            "usage_percent": None,
+            "count": gpu_count
+        }
 

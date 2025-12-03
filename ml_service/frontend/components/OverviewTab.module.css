@@ -1,0 +1,369 @@
+.overviewTab {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* Row container for grouping tiles and frames */
+.row {
+  display: flex;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.card {
+  background: var(--color-bg-secondary, #ffffff);
+  border: 1.5px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  min-width: 200px;
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.cardHeader {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.cardHeader h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.statValue {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-primary, #6366f1);
+}
+
+.statLabel {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #6b7280);
+  text-align: center;
+}
+
+.statusIndicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.online {
+  color: #10b981;
+  font-size: 1.5rem;
+}
+
+.offline {
+  color: #ef4444;
+  font-size: 1.5rem;
+}
+
+/* Vertical layout for resource cards (CPU, RAM, GPU) */
+.resourceCardsVertical {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 200px;
+}
+
+/* Horizontal row for Active Requests + Queue Requests (for users) */
+.requestsRow {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+}
+
+/* Row for Active, Failed, Queued Requests tiles */
+.requestsTilesRow {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+}
+
+.section {
+  background: var(--color-bg-secondary, #ffffff);
+  border: 1.5px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  flex: 1;
+}
+
+.sectionTitle {
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid var(--color-primary, #6366f1);
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.infoItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.infoLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.statusOnline {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.statusOffline {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.modelsList {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.modelItem {
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.modelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.modelStatus {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: #10b981;
+  color: white;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.modelVersions {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: 0.25rem;
+}
+
+.modelAccuracy {
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #111827);
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.modelDate {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Vertical layout for resource frames (Server Specification + Resource Usage) */
+.resourceFramesVertical {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+}
+
+.specsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.specItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 6px;
+}
+
+.specLabel {
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Requests summary for all users */
+.requestsSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.requestSummaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.requestSummaryLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.requestSummaryValue {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-primary, #6366f1);
+}
+
+.jobsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.jobItem {
+  padding: 0.75rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-primary, #6366f1);
+}
+
+.jobHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.jobStatus {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.jobStatusFailed {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: #ef4444;
+  color: white;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.jobStatusQueued {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: #6b7280;
+  color: white;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.jobInfo {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.jobError {
+  font-size: 0.75rem;
+  color: #ef4444;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #fee2e2;
+  border-radius: 4px;
+}
+
+.resourceUsage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.resourceBar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.resourceLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.progressBar {
+  height: 8px;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary, #6366f1) 0%, var(--color-primary-hover, #4f46e5) 100%);
+  transition: width 0.3s ease;
+}
+
+.empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-text-secondary, #6b7280);
+  font-style: italic;
+}
+
+.loading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.error {
+  padding: 2rem;
+  text-align: center;
+  color: #ef4444;
+}

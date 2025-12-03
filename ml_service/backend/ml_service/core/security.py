@@ -2,11 +2,13 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
-from fastapi import HTTPException, Security, Header
+from typing import Optional, List
+from fastapi import HTTPException, Security, Header, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ml_service.core.config import settings
+from ml_service.db.repositories import ApiTokenRepository
+from ml_service.db.connection import db
 
 security = HTTPBearer(auto_error=False)
 
@@ -21,45 +23,127 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def validate_token(token: Optional[str] = None) -> bool:
-    """Validate admin token"""
-    if not settings.ML_ADMIN_API_TOKEN:
-        # If no token configured, allow access (development mode)
-        return True
-    
-    if not token:
-        return False
-    
-    # Compare with configured token
-    if token == settings.ML_ADMIN_API_TOKEN:
-        return True
-    
-    # Also check hashed version (for stored tokens)
-    token_hash = hash_token(token)
-    # In production, check against database
-    return False
-
-
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")
 ) -> dict:
-    """Dependency for authenticated endpoints"""
+    """
+    Dependency for authenticated endpoints.
+    Always validates tokens through database (no dev mode).
+    """
     # Get token from X-Admin-Token header or Authorization Bearer
     token = x_admin_token
     if not token and credentials:
         token = credentials.credentials
     
-    # If no token configured, allow access (development mode)
-    if not settings.ML_ADMIN_API_TOKEN:
-        return {"authenticated": True, "token": None, "mode": "development"}
-    
-    # Validate token
-    if not validate_token(token):
+    if not token:
         raise HTTPException(
-            status_code=403,
-            detail="Invalid or missing authentication token"
+            status_code=401,
+            detail="Missing authentication token"
         )
     
-    return {"authenticated": True, "token": token, "mode": "production"}
+    # Check admin token from env (for backward compatibility)
+    if settings.ML_ADMIN_API_TOKEN and token == settings.ML_ADMIN_API_TOKEN:
+        return {
+            "authenticated": True,
+            "user_id": "system_admin",
+            "username": "system_admin",
+            "tier": "system_admin"
+        }
+    
+    # Validate token through database
+    token_hash = hash_token(token)
+    token_repo = ApiTokenRepository()
+    api_token = token_repo.get_by_hash(token_hash)
+    
+    if not api_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token"
+        )
+    
+    # Get user information from database
+    with db.get_connection() as conn:
+        user_row = conn.execute("""
+            SELECT user_id, username, tier, is_active
+            FROM users
+            WHERE user_id = ? AND is_active = 1
+        """, (api_token.user_id,)).fetchone()
+        
+        if not user_row:
+            raise HTTPException(
+                status_code=401,
+                detail="User not found or inactive"
+            )
+        
+        # Update last_used_at for the token
+        token_repo.update_last_used(api_token.token_id)
+        
+        return {
+            "authenticated": True,
+            "user_id": user_row['user_id'],
+            "username": user_row['username'],
+            "tier": user_row['tier'] or 'user'
+        }
+
+
+# Dependency for authenticated endpoints
+AuthDep = Depends(get_current_user)
+
+
+def require_tier(allowed_tiers: List[str]):
+    """Dependency для проверки tier пользователя"""
+    def check(user: dict = AuthDep):
+        if user.get("tier") not in allowed_tiers:
+            raise HTTPException(403, "Access denied")
+        return user
+    return Depends(check)
+
+
+def require_system_admin():
+    """Dependency для проверки system_admin"""
+    return require_tier(["system_admin"])
+
+
+def require_admin():
+    """Dependency для проверки admin или system_admin"""
+    return require_tier(["system_admin", "admin"])
+
+
+def can_manage_user(current_user: dict, target_user_tier: str) -> bool:
+    """
+    Проверка, может ли текущий пользователь управлять целевым пользователем
+    
+    Args:
+        current_user: информация о текущем пользователе
+        target_user_tier: tier целевого пользователя
+        
+    Returns:
+        True если может управлять, False если нет
+    """
+    current_tier = current_user.get("tier")
+    
+    if current_tier == "system_admin":
+        return True  # system_admin может управлять всеми
+    
+    if current_tier == "admin":
+        # admin может управлять только user, но не admin и system_admin
+        return target_user_tier == "user"
+    
+    return False  # user не может управлять никем
+
+
+def can_create_tier(current_user: dict, new_tier: str) -> bool:
+    """Проверка, может ли текущий пользователь создать пользователя с указанным tier"""
+    current_tier = current_user.get("tier")
+    
+    if current_tier == "system_admin":
+        # system_admin может создать user или admin, но не system_admin
+        return new_tier in ["user", "admin"]
+    
+    if current_tier == "admin":
+        # admin может создать только user
+        return new_tier == "user"
+    
+    return False
 

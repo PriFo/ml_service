@@ -29,17 +29,39 @@ async function httpRequest<T>(
       signal: options.signal,
     });
 
+    // Check if response is JSON before parsing
+    const contentType = response.headers.get('content-type');
+    const isJson = contentType && contentType.includes('application/json');
+
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      try {
-        const errorData = await response.json();
-        if (errorData.detail) {
-          errorMessage = errorData.detail;
+      if (isJson) {
+        try {
+          const errorData = await response.json();
+          if (errorData.detail) {
+            errorMessage = errorData.detail;
+          }
+        } catch {
+          // If response is not JSON, use status text
         }
-      } catch {
-        // If response is not JSON, use status text
+      } else {
+        // If response is HTML (error page), try to get text
+        try {
+          const text = await response.text();
+          if (text.includes('<!DOCTYPE')) {
+            errorMessage = `Server returned HTML instead of JSON. Check if backend is running at ${API_URL}`;
+          }
+        } catch {
+          // Use default error message
+        }
       }
       throw new Error(errorMessage);
+    }
+
+    // Only parse as JSON if content-type is JSON
+    if (!isJson) {
+      const text = await response.text();
+      throw new Error(`Expected JSON but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
     }
 
     return response.json();
@@ -144,6 +166,49 @@ export const api = {
     method: 'POST',
     body: data,
   }),
+
+  // Model management
+  deleteModel: (modelKey: string, deleteArtifacts: boolean = false) => {
+    const endpoint = `/models/${modelKey}?delete_artifacts=${deleteArtifacts}`;
+    return httpRequest(endpoint, { method: 'DELETE' });
+  },
+
+  // Admin operations
+  recreateDatabase: (backup: boolean = true, restoreFromBackup: boolean = false) => {
+    return httpRequest('/admin/recreate-db', {
+      method: 'POST',
+      body: { backup, restore_from_backup: restoreFromBackup },
+    });
+  },
+
+  cancelJob: (jobId: string) => {
+    return httpRequest(`/jobs/${jobId}/cancel`, { method: 'POST' });
+  },
+
+  // Scheduler & Queue
+  getSchedulerStats: () => {
+    return httpRequest('/scheduler/stats');
+  },
+
+  getQueueStats: () => {
+    return httpRequest('/queue/stats');
+  },
+
+  pauseScheduler: () => {
+    return httpRequest('/scheduler/pause', { method: 'POST' });
+  },
+
+  resumeScheduler: () => {
+    return httpRequest('/scheduler/resume', { method: 'POST' });
+  },
+
+  // Authentication
+  login: (username: string, password: string) => httpRequest<{ token: string; user_id: string; username: string; tier: string; expires_in?: number }>('/auth/login', {
+    method: 'POST',
+    body: { username, password },
+  }),
+
+  getUserInfo: () => httpRequest<{ tier: string; username: string; authenticated: boolean }>('/auth/user-info'),
 };
 
 // WebSocket client

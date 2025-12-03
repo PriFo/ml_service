@@ -5,7 +5,7 @@ import { useAppStore } from '@/lib/store';
 import ThemeDropdown from './ThemeDropdown';
 import styles from './Sidebar.module.css';
 
-type TabType = 'overview' | 'models' | 'predict' | 'jobs' | 'events';
+type TabType = 'overview' | 'models' | 'predict' | 'training' | 'jobs' | 'events';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -13,29 +13,23 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
-  const { state } = useAppStore();
+  const { state, dispatch } = useAppStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const menuItems: Array<{ id: TabType; label: string; icon: string }> = [
     { id: 'overview', label: 'Overview', icon: 'dashboard' },
     { id: 'models', label: 'Models', icon: 'model' },
     { id: 'predict', label: 'Predict', icon: 'predict' },
+    { id: 'training', label: 'Training', icon: 'training' },
     { id: 'jobs', label: 'Jobs', icon: 'jobs' },
     { id: 'events', label: 'Events', icon: 'events' },
   ];
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
+    dispatch({ type: 'LOGOUT' });
+    // Reload page to reset all state
     if (typeof window !== 'undefined') {
-      try {
-        sessionStorage.removeItem('api_token');
-        localStorage.removeItem('api_token');
-        // Force reload to clear all state
-        window.location.href = '/';
-      } catch (error) {
-        console.error('Logout error:', error);
-        // Fallback: just reload
-        window.location.reload();
-      }
+      window.location.href = '/';
     }
   };
 
@@ -88,6 +82,7 @@ function getIcon(iconName: string): string {
     dashboard: '▣',
     model: '⬟',
     predict: '▶',
+    training: '🎓',
     jobs: '⚙',
     events: '⚡',
     logout: '◄',

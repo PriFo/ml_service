@@ -29,9 +29,12 @@ class ConnectionManager:
     async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket):
         """Send message to specific connection"""
         try:
-            await websocket.send_json(message)
+            if websocket.client_state.name == "CONNECTED":
+                await websocket.send_json(message)
         except Exception as e:
-            logger.error(f"Error sending message: {e}")
+            # Only log if it's not a normal disconnection
+            if "not connected" not in str(e).lower() and "closed" not in str(e).lower():
+                logger.warning(f"Error sending message to WebSocket: {e}")
             self.disconnect(websocket)
     
     async def broadcast(self, message: Dict[str, Any]):
@@ -39,9 +42,15 @@ class ConnectionManager:
         disconnected = []
         for connection in self.active_connections:
             try:
-                await connection.send_json(message)
+                # Check if connection is still active
+                if connection.client_state.name == "CONNECTED":
+                    await connection.send_json(message)
+                else:
+                    disconnected.append(connection)
             except Exception as e:
-                logger.error(f"Error broadcasting to connection: {e}")
+                # Only log if it's not a normal disconnection
+                if "not connected" not in str(e).lower() and "closed" not in str(e).lower():
+                    logger.debug(f"Error broadcasting to connection: {e}")
                 disconnected.append(connection)
         
         # Remove disconnected connections
@@ -53,8 +62,41 @@ class ConnectionManager:
         message = {
             "type": event_type,
             "payload": payload,
-            "timestamp": json.dumps(datetime.now().isoformat())
+            "timestamp": datetime.now().isoformat()
         }
+        await self.broadcast(message)
+    
+    async def send_job_progress(self, job_id: str, current: int, total: int):
+        """Send job progress update to all clients"""
+        percent = int((current / total * 100)) if total > 0 else 0
+        message = {
+            "type": "job:progress",
+            "job_id": job_id,
+            "progress": {
+                "current": current,
+                "total": total,
+                "percent": percent
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        await self.broadcast(message)
+    
+    async def send_job_status(self, job_id: str, status: str, job_data: Dict[str, Any] = None):
+        """Send job status update to all clients"""
+        message = {
+            "type": "job:status",
+            "job_id": job_id,
+            "status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+        if job_data:
+            message["job"] = job_data
+        await self.broadcast(message)
+    
+    async def send_to_job_subscribers(self, job_id: str, message: Dict[str, Any]):
+        """Send message to clients subscribed to specific job"""
+        # For now, broadcast to all (can be optimized with subscription tracking)
+        message["job_id"] = job_id
         await self.broadcast(message)
 
 

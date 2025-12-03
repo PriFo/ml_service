@@ -1,0 +1,99 @@
+.jobCard {
+  background: var(--color-bg-secondary, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-left: 4px solid;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  transition: box-shadow 0.2s ease;
+}
+
+.jobCard:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.jobHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.jobTypeBadge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.jobStatus {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.statusIcon {
+  font-size: 1rem;
+}
+
+.jobInfo {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.jobId {
+  font-family: monospace;
+  margin-bottom: 0.25rem;
+}
+
+.modelKey {
+  margin-bottom: 0.25rem;
+}
+
+.progressInfo {
+  margin-top: 0.25rem;
+}
+
+.progressSection {
+  margin-bottom: 0.75rem;
+}
+
+.jobActions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.cancelButton,
+.detailsButton {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.cancelButton {
+  background-color: #ef4444;
+  color: white;
+}
+
+.cancelButton:hover {
+  background-color: #dc2626;
+}
+
+.detailsButton {
+  background-color: var(--color-primary, #3b82f6);
+  color: white;
+}
+
+.detailsButton:hover {
+  background-color: var(--color-primary-dark, #2563eb);
+}
+

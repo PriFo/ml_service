@@ -25,8 +25,8 @@ class Job:
     """Job entity (supports train, predict, drift, other)"""
     job_id: str
     model_key: str
-    job_type: str = "train"  # train, predict, drift, other
-    status: str = "queued"  # queued, running, completed, failed
+    job_type: str = "train"  # train, predict, drift, other (alias: type)
+    status: str = "queued"  # queued, running, completed, failed, cancelled
     stage: Optional[str] = None  # этап обработки
     source: str = "api"  # api, gui, system
     created_at: Optional[datetime] = None
@@ -37,6 +37,22 @@ class Job:
     error_message: Optional[str] = None
     client_ip: Optional[str] = None
     user_agent: Optional[str] = None
+    # New fields for v3.2
+    priority: int = 5  # 0-14, calculated priority
+    user_tier: str = "user"  # system_admin, admin, user
+    user_id: Optional[str] = None  # User who created the job
+    data_size_bytes: Optional[int] = None  # Size of dataset in bytes
+    progress_current: int = 0  # Current progress
+    progress_total: int = 100  # Total progress
+    model_version: Optional[str] = None  # Model version
+    assigned_worker_id: Optional[str] = None  # Worker handling this job
+    request_payload: Optional[str] = None  # JSON string with original request data
+    result_payload: Optional[str] = None  # JSON string with results
+    user_os: Optional[str] = None  # Detected OS from user agent
+    user_device: Optional[str] = None  # Detected device from user agent
+    user_cpu_cores: Optional[int] = None  # User's CPU cores if available
+    user_ram_gb: Optional[float] = None  # User's RAM in GB if available
+    user_gpu: Optional[str] = None  # User's GPU info if available
 
 
 # Backward compatibility alias
@@ -111,6 +127,20 @@ class PredictionLog:
 
 
 @dataclass
+class ApiToken:
+    """API token entity (for sessions and API keys)"""
+    token_id: str
+    token_hash: str
+    user_id: str
+    token_type: str  # "session" or "api"
+    name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    is_active: int = 1
+
+
+@dataclass
 class Event:
     """Event entity for monitoring all events (drift, predict, train)"""
     event_id: str
@@ -126,3 +156,7 @@ class Event:
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    # New fields for v3.2
+    duration_ms: Optional[int] = None  # Duration in milliseconds
+    display_format: str = "table"  # table, list, card
+    data_size_bytes: Optional[int] = None  # Size of data in bytes

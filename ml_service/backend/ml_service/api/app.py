@@ -8,11 +8,11 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from ml_service.api.routes import router
+from ml_service.api.routes import router, scheduler as job_scheduler
 from ml_service.api.deps import AuthDep
 from ml_service.core.config import settings
 from ml_service.db.migrations import run_migrations
-from ml_service.core.daily_scheduler import scheduler
+from ml_service.core.daily_scheduler import scheduler as daily_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,13 @@ async def get_openapi_json(user: dict = AuthDep):
 async def startup_event():
     """Startup tasks"""
     # Start daily scheduler
-    scheduler.start()
+    daily_scheduler.start()
+    
+    # Start job scheduler
+    if job_scheduler:
+        await job_scheduler.start()
+        print("Job scheduler started")
+    
     print("ML Service 0.9.1 started")
     print(f"API available at http://{settings.ML_SERVICE_HOST}:{settings.ML_SERVICE_PORT}")
 
@@ -128,6 +134,12 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Shutdown tasks"""
-    scheduler.stop()
+    daily_scheduler.stop()
+    
+    # Stop job scheduler
+    if job_scheduler:
+        await job_scheduler.stop()
+        print("Job scheduler stopped")
+    
     print("ML Service 0.9.1 stopped")
 

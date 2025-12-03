@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api, wsClient } from '@/lib/api';
 import Dashboard from '@/components/Dashboard';
@@ -8,29 +8,9 @@ import Login from '@/components/Login';
 
 export default function Home() {
   const { state, dispatch } = useAppStore();
-  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // Check if user is already authenticated
-    const checkAuth = () => {
-      if (typeof window !== 'undefined') {
-        const token = sessionStorage.getItem('api_token') || localStorage.getItem('api_token');
-        // In dev mode, allow empty token
-        if (token !== null || process.env.NODE_ENV === 'development') {
-          dispatch({
-            type: 'SET_AUTHENTICATED',
-            payload: { isAuthenticated: true, token: token || '' },
-          });
-        }
-      }
-      setCheckingAuth(false);
-    };
-
-    checkAuth();
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (!state.isAuthenticated && !checkingAuth) {
+    if (!state.isAuthenticated) {
       return;
     }
 
@@ -81,18 +61,14 @@ export default function Home() {
     return () => {
       wsClient.disconnect();
     };
-  }, [dispatch, state.isAuthenticated, checkingAuth]);
+  }, [dispatch, state.isAuthenticated]);
 
-  const handleLogin = (token: string) => {
+  const handleLogin = (token: string, tier?: string) => {
     dispatch({
       type: 'SET_AUTHENTICATED',
-      payload: { isAuthenticated: true, token },
+      payload: { isAuthenticated: true, token, tier: tier || null },
     });
   };
-
-  if (checkingAuth) {
-    return <div>Loading...</div>;
-  }
 
   if (!state.isAuthenticated) {
     return <Login onLogin={handleLogin} />;

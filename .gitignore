@@ -44,6 +44,7 @@ out/
 *.log
 */log_run_backend.txt
 */log_START_UNIFIED.txt
+*/logs/
 
 # System files
 .DS_Store

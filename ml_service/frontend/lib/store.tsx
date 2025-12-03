@@ -19,6 +19,7 @@ const initialState: AppState = {
   error: null,
   isAuthenticated: false,
   userToken: null,
+  userTier: null,
 };
 
 // Action types
@@ -32,7 +33,8 @@ type Action =
   | { type: 'SET_COOKIE_CONSENT'; payload: Consent | null }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'SET_AUTHENTICATED'; payload: { isAuthenticated: boolean; token: string | null } };
+  | { type: 'SET_AUTHENTICATED'; payload: { isAuthenticated: boolean; token: string | null; tier?: string | null } }
+  | { type: 'LOGOUT' };
 
 // Reducer
 function appReducer(state: AppState, action: Action): AppState {
@@ -72,6 +74,25 @@ function appReducer(state: AppState, action: Action): AppState {
         ...state,
         isAuthenticated: action.payload.isAuthenticated,
         userToken: action.payload.token,
+        userTier: action.payload.tier !== undefined ? action.payload.tier : state.userTier,
+      };
+    
+    case 'LOGOUT':
+      // Clear storage
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('api_token');
+        localStorage.removeItem('api_token');
+        sessionStorage.removeItem('user_tier');
+        localStorage.removeItem('user_tier');
+      }
+      return {
+        ...state,
+        isAuthenticated: false,
+        userToken: null,
+        userTier: null,
+        models: [],
+        alerts: [],
+        selectedModel: null,
       };
     
     default:

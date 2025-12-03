@@ -26,7 +26,7 @@ ML_LARGE_DATASET_HIDDEN_LAYERS=(1024, 512, 256, 128)
 ML_LARGE_DATASET_THRESHOLD=500000
 ML_ACTIVATION=relu
 ML_SOLVER=adam
-ML_MAX_ITER=500
+ML_MAX_ITER=5000
 ML_BATCH_SIZE=auto
 ML_LEARNING_RATE_INIT=0.001
 ML_ALPHA=0.0001
@@ -46,6 +46,14 @@ ML_RETRAINING_ACCURACY_DROP_THRESHOLD=-0.05
 # python -c "import secrets; print(secrets.token_urlsafe(32))"
 ML_ADMIN_API_TOKEN=dev_token_change_this_to_secure_token_min_32_chars
 ML_TOKEN_EXPIRY_DAYS=365
+
+# System Admin credentials (главный админ, создается при первом запуске)
+# Этот админ имеет полные права и может управлять другими админами
+ML_ADMIN_USERNAME=admin
+ML_ADMIN_PASSWORD=admin
+
+# Session expiration (в днях)
+ML_SESSION_EXPIRY_DAYS=30
 """
 
 def create_env():

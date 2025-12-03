@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store';
+import { api } from '@/lib/api';
 import styles from './AdminPanel.module.css';
 
 export default function AdminPanel() {
@@ -57,6 +58,43 @@ export default function AdminPanel() {
                 <li>Authentication requirements</li>
                 <li>Error codes and messages</li>
               </ul>
+            </div>
+
+            <div className={styles.dangerZone}>
+              <h4>Danger Zone</h4>
+              <button
+                className={styles.dangerButton}
+                onClick={async () => {
+                  const backup = confirm('Create backup before recreating database?');
+                  const restore = backup && confirm('Restore data from backup after recreation?');
+                  
+                  if (!confirm(
+                    `WARNING: This will ${restore ? 'recreate' : 'DELETE ALL DATA'} in the database!\n\n` +
+                    `Are you absolutely sure you want to proceed?`
+                  )) {
+                    return;
+                  }
+
+                  try {
+                    const result = await api.recreateDatabase(backup, restore);
+                    alert(
+                      `Database recreated successfully!\n` +
+                      (result.backup_path ? `Backup saved at: ${result.backup_path}` : '')
+                    );
+                    // Reload page to refresh data
+                    window.location.reload();
+                  } catch (error) {
+                    console.error('Failed to recreate database:', error);
+                    alert(`Failed to recreate database: ${(error as Error).message}`);
+                  }
+                }}
+              >
+                🔄 Recreate Database
+              </button>
+              <p className={styles.warning}>
+                This will delete all data and recreate the database schema. 
+                Make sure to create a backup first!
+              </p>
             </div>
           </div>
         </div>

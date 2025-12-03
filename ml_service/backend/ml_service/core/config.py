@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     ML_LARGE_DATASET_THRESHOLD: int = 500000
     ML_ACTIVATION: str = "relu"
     ML_SOLVER: str = "adam"
-    ML_MAX_ITER: int = 500
+    ML_MAX_ITER: int = 5000
     ML_BATCH_SIZE: str = "auto"
     ML_LEARNING_RATE_INIT: float = 0.001
     ML_ALPHA: float = 0.0001
@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     # Security
     ML_ADMIN_API_TOKEN: str = ""
     ML_TOKEN_EXPIRY_DAYS: int = 365
+    
+    # System admin credentials (для создания главного админа при первом запуске)
+    ML_ADMIN_USERNAME: str = "admin"
+    ML_ADMIN_PASSWORD: str = "admin"
+    
+    # Session settings
+    ML_SESSION_EXPIRY_DAYS: int = 30
     
     class Config:
         env_file = ".env"

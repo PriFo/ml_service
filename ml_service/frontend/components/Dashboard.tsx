@@ -13,9 +13,15 @@ import JobsTracker from './JobsTracker';
 import AdminPanel from './AdminPanel';
 import DashboardCards from './DashboardCards';
 import EventFeed from './EventFeed';
+import OverviewTab from './OverviewTab';
+import EventsTab from './EventsTab';
+import JobsTab from './JobsTab';
+import TrainingTab from './TrainingTab';
+import PredictTab from './PredictTab';
+import ModelsTab from './ModelsTab';
 import styles from './Dashboard.module.css';
 
-type TabType = 'overview' | 'models' | 'predict' | 'jobs' | 'events';
+type TabType = 'overview' | 'models' | 'predict' | 'jobs' | 'events' | 'training';
 
 export default function Dashboard() {
   const { state, dispatch } = useAppStore();
@@ -30,34 +36,27 @@ export default function Dashboard() {
         
         <main className={styles.main}>
           {activeTab === 'overview' && (
-            <>
-              <DashboardCards />
-              <ServiceMonitor />
-              <EventFeed />
-              <AdminPanel />
-            </>
+            <OverviewTab />
           )}
 
           {activeTab === 'models' && (
-            <>
-              <ModelManager />
-              <ModelSelector />
-            </>
+            <ModelsTab onNavigateToTraining={() => setActiveTab('training')} />
           )}
 
           {activeTab === 'predict' && (
-            <Predictor />
+            <PredictTab />
+          )}
+
+          {activeTab === 'training' && (
+            <TrainingTab />
           )}
 
           {activeTab === 'jobs' && (
-            <JobsTracker />
+            <JobsTab />
           )}
 
           {activeTab === 'events' && (
-            <>
-              <EventFeed />
-              <DashboardCards />
-            </>
+            <EventsTab />
           )}
           
           {state.isLoading && (

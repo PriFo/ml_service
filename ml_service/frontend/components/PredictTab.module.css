@@ -1,0 +1,61 @@
+.predictTab {
+  padding: 1rem;
+}
+
+.predictTab h2 {
+  margin-bottom: 1rem;
+}
+
+.predictTab select,
+.predictTab input {
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border: 1.5px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  background-color: var(--color-bg-primary, #ffffff);
+  color: var(--color-text-primary, #111827);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  width: 100%;
+  max-width: 400px;
+}
+
+.predictTab select {
+  padding-right: 2.5rem;
+  cursor: pointer;
+}
+
+.predictTab select:focus,
+.predictTab input:focus {
+  outline: none;
+  border-color: var(--color-primary, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1), 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.predictTab select:hover,
+.predictTab input:hover {
+  border-color: var(--color-primary, #6366f1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.predictTab button {
+  padding: 0.5rem 1rem;
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.versionSelect {
+  margin-top: 1rem;
+}
+
+.versionSelect label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+

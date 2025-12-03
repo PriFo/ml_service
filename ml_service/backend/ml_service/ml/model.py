@@ -318,7 +318,24 @@ class MLModel:
                     feature_arrays.append(df[[field]].values)
         
         if not feature_arrays:
-            raise ValueError("No valid features found")
+            # Collect information about missing fields for better error message
+            missing_fields = []
+            for field in feature_fields:
+                if field not in df.columns:
+                    missing_fields.append(field)
+            
+            if missing_fields:
+                available_fields = ', '.join(sorted(df.columns.tolist()))
+                raise ValueError(
+                    f"No valid features found. Missing fields: {', '.join(missing_fields)}. "
+                    f"Available fields in data: {available_fields}"
+                )
+            else:
+                raise ValueError(
+                    f"No valid features found. All specified feature fields exist but could not be processed. "
+                    f"Feature fields: {', '.join(feature_fields)}. "
+                    f"Available fields: {', '.join(sorted(df.columns.tolist()))}"
+                )
         
         # Concatenate all features
         X = np.hstack(feature_arrays)
@@ -576,7 +593,11 @@ class MLModel:
         target_field: str,
         feature_fields: List[str],
         validation_split: float = 0.1,
-        use_gpu: bool = False
+        use_gpu: bool = False,
+        hidden_layers: Optional[Tuple[int, ...]] = None,
+        max_iter: Optional[int] = None,
+        learning_rate_init: Optional[float] = None,
+        alpha: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Train MLPClassifier model
@@ -615,9 +636,18 @@ class MLModel:
         else:
             X_train, X_val, y_train, y_val = X, X, y, y
         
-        # Get architecture based on dataset size
-        hidden_layer_sizes = settings.get_hidden_layer_sizes(dataset_size)
-        logger.info(f"Using architecture: {hidden_layer_sizes}")
+        # Get architecture - use provided or auto-detect based on dataset size
+        if hidden_layers:
+            hidden_layer_sizes = hidden_layers
+            logger.info(f"Using provided architecture: {hidden_layer_sizes}")
+        else:
+            hidden_layer_sizes = settings.get_hidden_layer_sizes(dataset_size)
+            logger.info(f"Using auto-detected architecture (based on dataset size {dataset_size}): {hidden_layer_sizes}")
+        
+        # Use provided parameters or fall back to settings
+        max_iter_value = max_iter if max_iter is not None else settings.ML_MAX_ITER
+        learning_rate_value = learning_rate_init if learning_rate_init is not None else settings.ML_LEARNING_RATE_INIT
+        alpha_value = alpha if alpha is not None else settings.ML_ALPHA
         
         # Create and train classifier
         if self.backend == "cuml":
@@ -627,9 +657,9 @@ class MLModel:
                     hidden_layer_sizes=hidden_layer_sizes,
                     activation=settings.ML_ACTIVATION,
                     solver=settings.ML_SOLVER,
-                    max_iter=settings.ML_MAX_ITER,
-                    learning_rate_init=settings.ML_LEARNING_RATE_INIT,
-                    alpha=settings.ML_ALPHA,
+                    max_iter=max_iter_value,
+                    learning_rate_init=learning_rate_value,
+                    alpha=alpha_value,
                     early_stopping=settings.ML_EARLY_STOPPING,
                     validation_fraction=settings.ML_VALIDATION_FRACTION
                 )
@@ -642,9 +672,9 @@ class MLModel:
                 hidden_layer_sizes=hidden_layer_sizes,
                 activation=settings.ML_ACTIVATION,
                 solver=settings.ML_SOLVER,
-                max_iter=settings.ML_MAX_ITER,
-                learning_rate_init=settings.ML_LEARNING_RATE_INIT,
-                alpha=settings.ML_ALPHA,
+                max_iter=max_iter_value,
+                learning_rate_init=learning_rate_value,
+                alpha=alpha_value,
                 early_stopping=settings.ML_EARLY_STOPPING,
                 validation_fraction=settings.ML_VALIDATION_FRACTION,
                 batch_size=settings.ML_BATCH_SIZE if settings.ML_BATCH_SIZE != "auto" else "auto"

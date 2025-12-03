@@ -1,7 +1,6 @@
 """API dependencies"""
-from fastapi import Depends
-from ml_service.core.security import get_current_user
+from ml_service.core.security import AuthDep
 
-# Dependency for authenticated endpoints
-AuthDep = Depends(get_current_user)
+# Re-export AuthDep for backward compatibility
+__all__ = ['AuthDep']
 
