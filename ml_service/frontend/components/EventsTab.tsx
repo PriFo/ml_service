@@ -26,6 +26,8 @@ export default function EventsTab() {
     loadEvents();
   }, [selectedType, selectedStatus, page]);
 
+  // Убрано автоматическое обновление - обновление только при ручном обновлении или при изменении фильтров
+
   const loadEvents = async () => {
     setLoading(true);
     try {

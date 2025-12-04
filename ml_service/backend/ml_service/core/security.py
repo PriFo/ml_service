@@ -8,7 +8,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ml_service.core.config import settings
 from ml_service.db.repositories import ApiTokenRepository
-from ml_service.db.connection import db
+from ml_service.db.connection import db_manager
+
+# Try to import bcrypt, fallback to None if not installed
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+    bcrypt = None
 
 security = HTTPBearer(auto_error=False)
 
@@ -21,6 +29,33 @@ def generate_token() -> str:
 def hash_token(token: str) -> str:
     """Hash token using SHA256"""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def hash_password(password: str) -> str:
+    """Hash password using bcrypt with salt"""
+    if not BCRYPT_AVAILABLE:
+        raise ImportError(
+            "bcrypt is not installed. Please install it with: pip install bcrypt>=4.0.0\n"
+            "Or install all dependencies: pip install -r requirements.txt"
+        )
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify password against bcrypt hash"""
+    if not BCRYPT_AVAILABLE:
+        # Fallback to SHA256 if bcrypt is not available (for backward compatibility)
+        sha256_hash = hashlib.sha256(password.encode()).hexdigest()
+        return sha256_hash == password_hash
+    
+    try:
+        # Try bcrypt first (new format)
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except (ValueError, TypeError):
+        # Fallback to SHA256 for backward compatibility (legacy passwords)
+        # This allows existing passwords to still work during migration
+        sha256_hash = hashlib.sha256(password.encode()).hexdigest()
+        return sha256_hash == password_hash
 
 
 async def get_current_user(
@@ -63,7 +98,7 @@ async def get_current_user(
         )
     
     # Get user information from database
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         user_row = conn.execute("""
             SELECT user_id, username, tier, is_active
             FROM users

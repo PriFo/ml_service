@@ -39,7 +39,6 @@ from ml_service.db.models import PredictionLog, Event, Job
 from ml_service.ml.model import MLModel
 from ml_service.ml.validators import DataValidator
 from ml_service.core.config import settings
-from ml_service.core.config import settings
 from ml_service.core.request_source import (
     detect_request_source, get_client_ip, get_user_agent,
     parse_user_agent, get_user_system_info, calculate_data_size
@@ -143,13 +142,15 @@ async def process_training_job(job_id: str, request: TrainingRequest, event_id: 
         # Create model instance
         features_config = {
             "feature_fields": request.feature_fields,
-            "target_field": request.target_field
+            "target_field": request.target_field,
+            "task_type": request.task_type
         }
         
         model = MLModel(
             model_key=request.model_key,
             version=request.version,
-            features_config=features_config
+            features_config=features_config,
+            task_type=request.task_type
         )
         
         # Parse hidden_layers if provided
@@ -194,6 +195,25 @@ async def process_training_job(job_id: str, request: TrainingRequest, event_id: 
         )
         model_repo.create(db_model)
         
+        # Prepare structured output data for events
+        training_output = {
+            "metrics": metrics,
+            "params": {
+                "model_key": request.model_key,
+                "version": request.version,
+                "task_type": request.task_type,
+                "target_field": request.target_field,
+                "feature_fields": request.feature_fields,
+                "validation_split": request.validation_split,
+                "use_gpu": request.use_gpu_if_available,
+                "hidden_layers": request.hidden_layers,
+                "max_iter": request.max_iter,
+                "learning_rate_init": request.learning_rate_init,
+                "alpha": request.alpha
+            },
+            "dataset_size": len(request.items)
+        }
+        
         # Update job status
         job_repo.update_status(job_id, "completed", metrics=metrics, stage="completed")
         if event_repo and event_id:
@@ -201,7 +221,7 @@ async def process_training_job(job_id: str, request: TrainingRequest, event_id: 
                 event_id, 
                 "completed", 
                 stage="completed",
-                output_data=json.dumps(metrics)
+                output_data=json.dumps(training_output)
             )
         
     except Exception as e:
@@ -283,13 +303,15 @@ async def process_retrain_job(job_id: str, request: RetrainingRequest, event_id:
         # Create new model instance for the new version
         features_config = {
             "feature_fields": request.feature_fields,
-            "target_field": request.target_field
+            "target_field": request.target_field,
+            "task_type": base_model.task_type
         }
         
         new_model = MLModel(
             model_key=request.model_key,
             version=request.new_version,
-            features_config=features_config
+            features_config=features_config,
+            task_type=base_model.task_type
         )
         
         # Load base model to potentially reuse some configurations
@@ -298,7 +320,8 @@ async def process_retrain_job(job_id: str, request: RetrainingRequest, event_id:
         base_model_ml = MLModel(
             model_key=request.model_key,
             version=request.base_version,
-            features_config=features_config
+            features_config=features_config,
+            task_type=base_model.task_type
         )
         
         # Try to load base model to verify it exists
@@ -397,13 +420,15 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
         job_repo.update_status(job_id, "running", stage="loading_model")
         features_config = {
             "feature_fields": safe_parse_feature_fields(model.feature_fields),
-            "target_field": model.target_field or ""
+            "target_field": model.target_field or "",
+            "task_type": model.task_type
         }
         
         ml_model = MLModel(
             model_key=request.model_key,
             version=request.version or model.version,
-            features_config=features_config
+            features_config=features_config,
+            task_type=model.task_type
         )
         
         try:
@@ -475,6 +500,33 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
         
         processing_time = int((time.time() - start_time) * 1000)
         
+        # Prepare structured output data for events
+        # Use zip to safely pair valid_items with predictions
+        structured_output = {
+            "processed_items": [
+                {
+                    "input": valid_item,
+                    "prediction": pred.get("prediction"),
+                    "confidence": pred.get("confidence")
+                }
+                for valid_item, pred in zip(valid_items, predictions)
+            ],
+            "invalid_items": [
+                {
+                    "input": item.get("input") if isinstance(item, dict) else item,
+                    "reason": item.get("reason") if isinstance(item, dict) else "Validation failed"
+                }
+                for item in (invalid_items or [])
+            ],
+            "processing_stats": {
+                "total": len(request.data),
+                "processed": len(predictions),
+                "invalid": len(invalid_items) if invalid_items else 0,
+                "success_rate": len(predictions) / len(request.data) if request.data else 0
+            },
+            "processing_time_ms": processing_time
+        }
+        
         # Prepare result data - predictions are already dicts
         result_data = {
             "predictions": predictions,  # Already in correct format
@@ -489,11 +541,8 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
                 event_id,
                 "completed",
                 stage="completed",
-                output_data=json.dumps({
-                    "predictions_count": len(predictions),
-                    "processing_time_ms": processing_time,
-                    "invalid_items_count": len(invalid_items) if invalid_items else 0
-                })
+                output_data=json.dumps(structured_output),
+                duration_ms=processing_time
             )
         
     except Exception as e:
@@ -1024,6 +1073,7 @@ async def get_jobs(
             job_type=job.job_type,
             status=job.status,
             stage=job.stage,
+            source=getattr(job, 'source', 'api'),  # Handle legacy jobs without source attribute
             created_at=job.created_at or datetime.now(),
             started_at=job.started_at,
             completed_at=job.completed_at,
@@ -1171,38 +1221,89 @@ async def check_quality(
     )
 
 
-@router.get("/models", response_model=ModelsResponse)
+@router.get("/models")
 async def list_models(user: dict = AuthDep):
-    """List all models"""
+    """List all models with full details for each version"""
+    # Note: response_model removed to allow additional fields (versionsDetails, task_type, etc.)
     model_repo = ModelRepository()
+    job_repo = JobRepository()
+    user_tier = user.get("tier", "user") if user else "user"
+    user_id = user.get("user_id") if user else None
+    
+    # Разделение доступа по ролям:
+    # - user: видит все модели (модели общие для всех)
+    # - admin: видит все модели
+    # - system_admin: видит все модели
+    # Модели доступны всем, так как они используются для предсказаний
     models = model_repo.get_all()
     
-    # Group by model_key
+    # Get all training jobs once for efficiency and create a map
+    all_training_jobs = job_repo.get_all(
+        job_type="train",
+        status="completed"
+    )
+    # Create a map of (model_key, version) -> dataset_size
+    job_dataset_map = {}
+    for job in all_training_jobs:
+        if job.model_version:
+            key = (job.model_key, job.model_version)
+            if key not in job_dataset_map or job.dataset_size:
+                job_dataset_map[key] = job.dataset_size
+    
+    # Group by model_key and collect all versions with full details
     model_dict = {}
     for model in models:
         if model.model_key not in model_dict:
             model_dict[model.model_key] = {
+                "model_key": model.model_key,
                 "versions": [],
+                "versionsDetails": [],
                 "active_version": model.version,
                 "status": model.status,
                 "accuracy": model.accuracy,
-                "last_trained": model.last_trained
+                "last_trained": model.last_trained,
+                "task_type": model.task_type,
+                "target_field": model.target_field,
+                "feature_fields": model.feature_fields
             }
+        
+        # Get dataset size from training job for this specific version
+        dataset_size = job_dataset_map.get((model.model_key, model.version))
+        
+        # Add version details
+        version_detail = {
+            "version": model.version,
+            "status": model.status,
+            "accuracy": model.accuracy,
+            "last_trained": model.last_trained.isoformat() if model.last_trained else None,
+            "created_at": model.created_at.isoformat() if model.created_at else None,
+            "last_updated": model.last_updated.isoformat() if model.last_updated else None,
+            "task_type": model.task_type,
+            "target_field": model.target_field,
+            "feature_fields": model.feature_fields,
+            "dataset_size": dataset_size
+        }
+        
         model_dict[model.model_key]["versions"].append(model.version)
+        model_dict[model.model_key]["versionsDetails"].append(version_detail)
     
-    model_infos = [
-        ModelInfo(
-            model_key=key,
-            versions=info["versions"],
-            active_version=info["active_version"],
-            status=info["status"],
-            accuracy=info["accuracy"],
-            last_trained=info["last_trained"]
-        )
-        for key, info in model_dict.items()
-    ]
+    # Build response with all details
+    response_models = []
+    for key, info in model_dict.items():
+        response_models.append({
+            "model_key": info["model_key"],
+            "versions": info["versions"],
+            "versionsDetails": info["versionsDetails"],
+            "active_version": info["active_version"],
+            "status": info["status"],
+            "accuracy": info["accuracy"],
+            "last_trained": info["last_trained"].isoformat() if info["last_trained"] else None,
+            "task_type": info["task_type"],
+            "target_field": info["target_field"],
+            "feature_fields": info["feature_fields"]
+        })
     
-    return ModelsResponse(models=model_infos)
+    return {"models": response_models}
 
 
 @router.delete("/models/{model_key}")
@@ -1517,6 +1618,15 @@ async def get_events(
 ):
     """Get all events with optional filters"""
     event_repo = EventRepository()
+    user_tier = user.get("tier", "user") if user else "user"
+    user_id = user.get("user_id") if user else None
+    
+    # Разделение доступа по ролям:
+    # - user: видит все events (events не привязаны к пользователям напрямую)
+    # - admin: видит все events
+    # - system_admin: видит все events
+    # Примечание: В Event нет поля user_id, поэтому все пользователи видят все events
+    # Если нужно разделение, можно добавить user_id в Event модель в будущем
     events = event_repo.get_all(
         limit=limit,
         offset=offset,
@@ -1555,35 +1665,6 @@ async def get_events(
         "total": len(event_dicts),
         "limit": limit,
         "offset": offset
-    }
-
-
-@router.get("/events/{event_id}")
-async def get_event(event_id: str, user: dict = AuthDep):
-    """Get event details"""
-    event_repo = EventRepository()
-    event = event_repo.get(event_id)
-    
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    return {
-        "event_id": event.event_id,
-        "event_type": event.event_type,
-        "source": event.source,
-        "model_key": event.model_key,
-        "status": event.status,
-        "stage": event.stage,
-        "input_data": json.loads(event.input_data) if event.input_data else None,
-        "output_data": json.loads(event.output_data) if event.output_data else None,
-        "user_agent": event.user_agent,
-        "client_ip": event.client_ip,
-        "created_at": event.created_at.isoformat() if event.created_at else None,
-        "completed_at": event.completed_at.isoformat() if event.completed_at else None,
-        "error_message": event.error_message,
-        "duration_ms": event.duration_ms,
-        "display_format": event.display_format,
-        "data_size_bytes": event.data_size_bytes
     }
 
 
@@ -1683,6 +1764,110 @@ async def get_events_by_ip(
     return EventsResponse(events=event_infos)
 
 
+@router.get("/jobs")
+async def list_jobs(
+    job_type: Optional[str] = None,
+    status: Optional[str] = None,
+    model_key: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict = AuthDep
+):
+    """Get all jobs with optional filters"""
+    job_repo = JobRepository()
+    user_tier = user.get("tier", "user") if user else "user"
+    user_id = user.get("user_id") if user else None
+    
+    # Разделение доступа по ролям:
+    # - user: видит только свои jobs
+    # - admin: видит все jobs
+    # - system_admin: видит все jobs
+    if user_tier == "user" and user_id:
+        jobs = job_repo.get_all(
+            limit=limit,
+            offset=offset,
+            job_type=job_type,
+            status=status,
+            model_key=model_key,
+            user_id=user_id
+        )
+    else:
+        # admin и system_admin видят все jobs
+        jobs = job_repo.get_all(
+            limit=limit,
+            offset=offset,
+            job_type=job_type,
+            status=status,
+            model_key=model_key
+        )
+    
+    # Convert jobs to dict format
+    job_dicts = []
+    for job in jobs:
+        job_dict = {
+            "job_id": job.job_id,
+            "model_key": job.model_key,
+            "job_type": job.job_type,
+            "status": job.status,
+            "stage": job.stage,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "dataset_size": job.dataset_size,
+            "metrics": json.loads(job.metrics) if job.metrics else None,
+            "error_message": job.error_message,
+            "progress_current": job.progress_current,
+            "progress_total": job.progress_total,
+            "model_version": job.model_version,
+            "user_id": job.user_id
+        }
+        job_dicts.append(job_dict)
+    
+    return {
+        "jobs": job_dicts,
+        "total": len(job_dicts),
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str, user: dict = AuthDep):
+    """Get a specific job by ID"""
+    job_repo = JobRepository()
+    job = job_repo.get(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    user_tier = user.get("tier", "user") if user else "user"
+    user_id = user.get("user_id") if user else None
+    
+    # Разделение доступа: user может видеть только свои jobs
+    if user_tier == "user" and user_id and job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied. You can only view your own jobs.")
+    
+    job_dict = {
+        "job_id": job.job_id,
+        "model_key": job.model_key,
+        "job_type": job.job_type,
+        "status": job.status,
+        "stage": job.stage,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "dataset_size": job.dataset_size,
+        "metrics": json.loads(job.metrics) if job.metrics else None,
+        "error_message": job.error_message,
+        "progress_current": job.progress_current,
+        "progress_total": job.progress_total,
+        "model_version": job.model_version,
+        "user_id": job.user_id
+    }
+    
+    return job_dict
+
+
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str, user: dict = AuthDep):
     """Cancel a job"""
@@ -1691,6 +1876,13 @@ async def cancel_job(job_id: str, user: dict = AuthDep):
     
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    
+    user_tier = user.get("tier", "user") if user else "user"
+    user_id = user.get("user_id") if user else None
+    
+    # Разделение доступа: user может отменять только свои jobs
+    if user_tier == "user" and user_id and job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied. You can only cancel your own jobs.")
     
     # Check if job can be cancelled
     if job.status in ("completed", "failed", "cancelled"):
@@ -1704,7 +1896,25 @@ async def cancel_job(job_id: str, user: dict = AuthDep):
     job.completed_at = datetime.now()
     
     # Return updated job
-    return job_repo.to_dict(job)
+    job_dict = {
+        "job_id": job.job_id,
+        "model_key": job.model_key,
+        "job_type": job.job_type,
+        "status": "cancelled",
+        "stage": "cancelled",
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": datetime.now().isoformat(),
+        "dataset_size": job.dataset_size,
+        "metrics": json.loads(job.metrics) if job.metrics else None,
+        "error_message": job.error_message,
+        "progress_current": job.progress_current,
+        "progress_total": job.progress_total,
+        "model_version": job.model_version,
+        "user_id": job.user_id
+    }
+    
+    return job_dict
 
 
 # Priority Queue endpoints
@@ -1821,6 +2031,291 @@ async def recreate_db(
     return result
 
 
+# Database management endpoints
+@router.get("/admin/databases")
+async def list_databases(user: dict = AuthDep):
+    """List all databases (admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    databases = [
+        {
+            "name": "models",
+            "path": settings.ML_DB_MODELS_PATH,
+            "status": db_manager.models_db.status.value,
+            "tables": ["models", "jobs", "client_datasets", "retraining_jobs", "drift_checks", "alerts", "prediction_logs"]
+        },
+        {
+            "name": "users",
+            "path": settings.ML_DB_USERS_PATH,
+            "status": db_manager.users_db.status.value,
+            "tables": ["users", "api_tokens"]
+        },
+        {
+            "name": "logs",
+            "path": settings.ML_DB_LOGS_PATH,
+            "status": db_manager.logs_db.status.value,
+            "tables": ["alert_events", "train_events", "predict_events", "login_events", "system_events", "drift_events", "job_events"]
+        }
+    ]
+    return {"databases": databases}
+
+
+@router.get("/admin/databases/{db_name}/tables")
+async def list_tables(db_name: str, user: dict = AuthDep):
+    """List all tables in a database (admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    db = getattr(db_manager, f"{db_name}_db", None)
+    if not db:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    with db.get_connection() as conn:
+        tables = conn.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+        """).fetchall()
+    
+    return {"tables": [{"name": row["name"]} for row in tables]}
+
+
+@router.get("/admin/databases/{db_name}/tables/{table_name}")
+async def get_table_data(
+    db_name: str, 
+    table_name: str, 
+    limit: int = 100, 
+    offset: int = 0,
+    user: dict = AuthDep
+):
+    """Get data from a table (admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    
+    # Whitelist of allowed tables per database
+    ALLOWED_TABLES = {
+        "models": ["models", "jobs", "client_datasets", "retraining_jobs", "drift_checks", "alerts", "prediction_logs"],
+        "users": ["users", "api_tokens"],
+        "logs": ["alert_events", "train_events", "predict_events", "login_events", "system_events", "drift_events", "job_events"]
+    }
+    
+    # Validate table name against whitelist
+    if db_name not in ALLOWED_TABLES:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    if table_name not in ALLOWED_TABLES[db_name]:
+        raise HTTPException(status_code=400, detail=f"Table {table_name} is not allowed in database {db_name}")
+    
+    db = getattr(db_manager, f"{db_name}_db", None)
+    if not db:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    # Validate table exists
+    with db.get_connection() as conn:
+        table_exists = conn.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name = ?
+        """, (table_name,)).fetchone()
+        
+        if not table_exists:
+            raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
+        
+        # Get table schema (table_name is validated, safe to use)
+        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        column_names = [col["name"] for col in columns]
+        
+        # Get data (table_name is validated, safe to use)
+        rows = conn.execute(f"""
+            SELECT * FROM {table_name} 
+            LIMIT ? OFFSET ?
+        """, (limit, offset)).fetchall()
+        
+        # Get total count (table_name is validated, safe to use)
+        count_row = conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+        total_count = count_row["count"] if count_row else 0
+    
+    return {
+        "table": table_name,
+        "columns": column_names,
+        "data": [dict(row) for row in rows],
+        "total": total_count,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@router.post("/admin/databases/{db_name}/tables/{table_name}")
+async def update_table_data(
+    db_name: str,
+    table_name: str,
+    data: dict,
+    user: dict = AuthDep
+):
+    """Update data in a table (admin and system_admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    from ml_service.db.queue_manager import WriteOperation
+    from ml_service.db.repositories import _queue_write
+    
+    # Whitelist of allowed tables per database
+    ALLOWED_TABLES = {
+        "models": ["models", "jobs", "client_datasets", "retraining_jobs", "drift_checks", "alerts", "prediction_logs"],
+        "users": ["users", "api_tokens"],
+        "logs": ["alert_events", "train_events", "predict_events", "login_events", "system_events", "drift_events", "job_events"]
+    }
+    
+    # Validate table name against whitelist
+    if db_name not in ALLOWED_TABLES:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    if table_name not in ALLOWED_TABLES[db_name]:
+        raise HTTPException(status_code=400, detail=f"Table {table_name} is not allowed in database {db_name}")
+    
+    db = getattr(db_manager, f"{db_name}_db", None)
+    if not db:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    # Validate that table exists
+    with db.get_connection() as conn:
+        table_exists = conn.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name = ?
+        """, (table_name,)).fetchone()
+        
+        if not table_exists:
+            raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
+        
+        # Get primary key (table_name is validated, safe to use)
+        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        pk_columns = [col["name"] for col in columns if col["pk"]]
+        
+        if not pk_columns:
+            raise HTTPException(status_code=400, detail="Table has no primary key")
+    
+    # Build UPDATE query (table_name and column names are validated)
+    update_fields = {k: v for k, v in data.items() if k not in pk_columns}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Validate column names exist in table
+    with db.get_connection() as conn:
+        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        valid_columns = {col["name"] for col in columns}
+        
+        for field_name in list(update_fields.keys()) + pk_columns:
+            if field_name not in valid_columns:
+                raise HTTPException(status_code=400, detail=f"Column {field_name} does not exist in table {table_name}")
+    
+    set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
+    where_clause = " AND ".join([f"{k} = ?" for k in pk_columns])
+    
+    sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}"
+    params = tuple(list(update_fields.values()) + [data[k] for k in pk_columns])
+    
+    _queue_write(db_name, WriteOperation.UPDATE, table_name, sql, params)
+    
+    return {"status": "success", "message": f"Update queued for {table_name}"}
+
+
+@router.get("/admin/databases/{db_name}/health")
+async def get_database_health(db_name: str, user: dict = AuthDep):
+    """Get database health status (admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier not in ["system_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    db = getattr(db_manager, f"{db_name}_db", None)
+    if not db:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    health = db.health_check()
+    return {
+        "database": db_name,
+        "status": db.status.value,
+        "health": health
+    }
+
+
+@router.post("/admin/databases/{db_name}/reconnect")
+async def reconnect_database(db_name: str, user: dict = AuthDep):
+    """Reconnect to a database (system_admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier != "system_admin":
+        raise HTTPException(status_code=403, detail="Access denied. System admin rights required.")
+    
+    from ml_service.db.connection import db_manager
+    db = getattr(db_manager, f"{db_name}_db", None)
+    if not db:
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    result = db.reconnect()
+    return {
+        "database": db_name,
+        "status": "reconnected" if result else "reconnect_failed",
+        "current_status": db.status.value
+    }
+
+
+@router.post("/admin/migrate-users")
+async def migrate_users_force(user: dict = AuthDep):
+    """Force migration of users from legacy database (system_admin only)"""
+    user_tier = user.get("tier", "user") if user else "user"
+    if user_tier != "system_admin":
+        raise HTTPException(status_code=403, detail="Access denied. System admin rights required.")
+    
+    from ml_service.db.migrations import migrate_to_separated_databases
+    from ml_service.db.connection import db_manager
+    from pathlib import Path
+    from ml_service.core.config import settings
+    
+    # Check if legacy DB exists
+    legacy_db_path = Path(settings.ML_DB_PATH)
+    if not legacy_db_path.exists():
+        return {
+            "status": "skipped",
+            "message": "Legacy database not found"
+        }
+    
+    # Check current user count
+    with db_manager.users_db.get_connection() as conn:
+        current_count = conn.execute("SELECT COUNT(*) as count FROM users").fetchone()
+        current_user_count = current_count['count'] if current_count else 0
+    
+    # Run migration
+    try:
+        migration_result = migrate_to_separated_databases()
+        
+        # Check new user count
+        with db_manager.users_db.get_connection() as conn:
+            new_count = conn.execute("SELECT COUNT(*) as count FROM users").fetchone()
+            new_user_count = new_count['count'] if new_count else 0
+        
+        return {
+            "status": migration_result.get("status", "unknown"),
+            "message": f"Migration completed. Users before: {current_user_count}, after: {new_user_count}",
+            "statistics": migration_result.get("statistics", {}),
+            "backup_path": migration_result.get("backup_path")
+        }
+    except Exception as e:
+        logger.error(f"Error during user migration: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Migration failed: {str(e)}"
+        )
+
+
 # Authentication endpoints
 @router.post("/auth/login", response_model=LoginResponse)
 async def login(request: LoginRequest):
@@ -1832,61 +2327,112 @@ async def login(request: LoginRequest):
     from ml_service.db.connection import db
     from ml_service.db.repositories import ApiTokenRepository
     from ml_service.db.models import ApiToken
-    from ml_service.core.security import generate_token, hash_token
+    from ml_service.core.security import generate_token, hash_token, verify_password
     from ml_service.core.config import settings
     
-    # Hash the provided password
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-    
     # Check user credentials
-    with db.get_connection() as conn:
-        user_row = conn.execute("""
-            SELECT user_id, username, tier, is_active
-            FROM users
-            WHERE username = ? AND password_hash = ? AND is_active = 1
-        """, (request.username, password_hash)).fetchone()
-        
-        if not user_row:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid username or password"
-            )
-        
-        # Update last login
-        conn.execute("""
-            UPDATE users SET last_login = ? WHERE user_id = ?
-        """, (datetime.now(), user_row['user_id']))
-        
-        # Generate secure token
-        token = generate_token()
-        token_hash = hash_token(token)
-        
-        # Calculate expiration date
-        expires_at = datetime.now() + timedelta(days=settings.ML_SESSION_EXPIRY_DAYS)
-        expires_in_seconds = int(settings.ML_SESSION_EXPIRY_DAYS * 24 * 60 * 60)
-        
-        # Save token in database
-        token_repo = ApiTokenRepository()
-        api_token = ApiToken(
-            token_id=str(uuid.uuid4()),
-            token_hash=token_hash,
-            user_id=user_row['user_id'],
-            token_type="session",
-            name=None,
-            created_at=datetime.now(),
-            expires_at=expires_at,
-            last_used_at=None,
-            is_active=1
+    from ml_service.db.connection import db_manager
+    logger.info(f"Attempting login for username: {request.username}")
+    
+    try:
+        with db_manager.users_db.get_connection() as conn:
+            # First check if user exists
+            user_exists = conn.execute("""
+                SELECT user_id, username, tier, is_active, password_hash
+                FROM users
+                WHERE username = ?
+            """, (request.username,)).fetchone()
+            
+            if not user_exists:
+                logger.warning(f"User not found: {request.username}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid username or password"
+                )
+            
+            # Get password hash for verification
+            user_with_password = conn.execute("""
+                SELECT user_id, username, tier, is_active, password_hash
+                FROM users
+                WHERE username = ? AND is_active = 1
+            """, (request.username,)).fetchone()
+            
+            if not user_with_password:
+                logger.warning(f"User not found or inactive: {request.username}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid username or password"
+                )
+            
+            # Verify password (supports both bcrypt and legacy SHA256)
+            if not verify_password(request.password, user_with_password['password_hash']):
+                logger.warning(f"Invalid password for user: {request.username}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid username or password"
+                )
+            
+            user_row = user_with_password
+            
+            logger.info(f"Successful login for user: {request.username} (tier: {user_row['tier']})")
+            
+            # Save user data before exiting the with block
+            user_id = user_row['user_id']
+            username = user_row['username']
+            tier = user_row['tier'] or 'user'
+            
+            # Update last login (queue write) - inside the with block
+            from ml_service.db.repositories import _queue_write
+            from ml_service.db.queue_manager import WriteOperation
+            sql = "UPDATE users SET last_login = ? WHERE user_id = ?"
+            params = (datetime.now(), user_id)
+            _queue_write("users", WriteOperation.UPDATE, "users", sql, params)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during login: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during authentication"
         )
-        token_repo.create(api_token)
-        
-        return LoginResponse(
-            token=token,
-            user_id=user_row['user_id'],
-            username=user_row['username'],
-            tier=user_row['tier'] or 'user',
-            expires_in=expires_in_seconds
-        )
+    
+    # Generate secure token (moved outside except block)
+    token = generate_token()
+    token_hash = hash_token(token)
+    
+    # Calculate expiration date
+    expires_at = datetime.now() + timedelta(days=settings.ML_SESSION_EXPIRY_DAYS)
+    expires_in_seconds = int(settings.ML_SESSION_EXPIRY_DAYS * 24 * 60 * 60)
+    
+    # Save token in database
+    # Use queue-based write for sequential database operations
+    from ml_service.db.connection import db_manager
+    from ml_service.db.repositories import ApiTokenRepository
+    from ml_service.db.models import ApiToken
+    
+    token_repo = ApiTokenRepository()
+    api_token = ApiToken(
+        token_id=str(uuid.uuid4()),
+        token_hash=token_hash,
+        user_id=user_id,
+        token_type="session",
+        name=None,
+        created_at=datetime.now(),
+        expires_at=expires_at,
+        last_used_at=None,
+        is_active=1
+    )
+    # Queue write operation (synchronous, handled by WriteQueueManager)
+    token_repo.create(api_token)
+    
+    return LoginResponse(
+        token=token,
+        user_id=user_id,
+        username=username,
+        tier=tier,
+        expires_in=expires_in_seconds
+    )
 
 
 @router.get("/auth/user-info")
@@ -1910,13 +2456,14 @@ async def register(request: RegisterRequest):
     Register a new user.
     Access: Public (available to all)
     """
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
+    from ml_service.core.security import hash_password
     
-    # Hash password
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    # Hash password using bcrypt
+    password_hash = hash_password(request.password)
     
     # Check if username already exists
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         existing_user = conn.execute("""
             SELECT user_id FROM users WHERE username = ?
         """, (request.username,)).fetchone()
@@ -1931,10 +2478,15 @@ async def register(request: RegisterRequest):
         user_id = str(uuid.uuid4())
         created_at = datetime.now()
         
-        conn.execute("""
+        # Queue write operation for user creation
+        from ml_service.db.repositories import _queue_write
+        from ml_service.db.queue_manager import WriteOperation
+        sql = """
             INSERT INTO users (user_id, username, password_hash, tier, created_at, is_active)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, request.username, password_hash, 'user', created_at, 1))
+        """
+        params = (user_id, request.username, password_hash, 'user', created_at, 1)
+        _queue_write("users", WriteOperation.CREATE, "users", sql, params)
         
         return RegisterResponse(
             user_id=user_id,
@@ -1951,7 +2503,7 @@ async def create_user(request: CreateUserRequest, user: dict = AuthDep):
     Create a new user (admin only).
     """
     from ml_service.core.security import require_admin, can_create_tier
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     
     # Check admin rights
     if user.get("tier") not in ["system_admin", "admin"]:
@@ -1964,11 +2516,12 @@ async def create_user(request: CreateUserRequest, user: dict = AuthDep):
             detail=f"You cannot create users with tier '{request.tier}'"
         )
     
-    # Hash password
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    # Hash password using bcrypt
+    from ml_service.core.security import hash_password
+    password_hash = hash_password(request.password)
     
     # Check if username already exists
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         existing_user = conn.execute("""
             SELECT user_id FROM users WHERE username = ?
         """, (request.username,)).fetchone()
@@ -1983,10 +2536,15 @@ async def create_user(request: CreateUserRequest, user: dict = AuthDep):
         user_id = str(uuid.uuid4())
         created_at = datetime.now()
         
-        conn.execute("""
+        # Queue write operation for user creation
+        from ml_service.db.repositories import _queue_write
+        from ml_service.db.queue_manager import WriteOperation
+        sql = """
             INSERT INTO users (user_id, username, password_hash, tier, created_at, is_active)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, request.username, password_hash, request.tier, created_at, 1))
+        """
+        params = (user_id, request.username, password_hash, request.tier, created_at, 1)
+        _queue_write("users", WriteOperation.CREATE, "users", sql, params)
         
         return UserInfo(
             user_id=user_id,
@@ -2008,14 +2566,14 @@ async def get_users(
     Get list of users (admin only).
     system_admin sees all users, admin sees only users with tier='user'.
     """
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from dateutil.parser import parse as parse_date
     
     # Check admin rights
     if user.get("tier") not in ["system_admin", "admin"]:
         raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
     
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         conditions = []
         params = []
         
@@ -2033,11 +2591,15 @@ async def get_users(
             conditions.append("is_active = ?")
             params.append(1 if is_active else 0)
         
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        # Build safe SQL query with parameterized conditions
+        if conditions:
+            where_clause = " AND ".join(conditions)
+            query = f"SELECT * FROM users WHERE {where_clause} ORDER BY created_at DESC"
+        else:
+            query = "SELECT * FROM users ORDER BY created_at DESC"
+            params = []
         
-        rows = conn.execute(f"""
-            SELECT * FROM users WHERE {where_clause} ORDER BY created_at DESC
-        """, params).fetchall()
+        rows = conn.execute(query, params).fetchall()
         
         users = [
             UserInfo(
@@ -2060,14 +2622,14 @@ async def get_user(user_id: str, user: dict = AuthDep):
     Get user information (admin only).
     """
     from ml_service.core.security import can_manage_user
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from dateutil.parser import parse as parse_date
     
     # Check admin rights
     if user.get("tier") not in ["system_admin", "admin"]:
         raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
     
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         user_row = conn.execute("""
             SELECT * FROM users WHERE user_id = ?
         """, (user_id,)).fetchone()
@@ -2100,14 +2662,14 @@ async def update_user(
     Update user information (admin only).
     """
     from ml_service.core.security import can_manage_user, can_create_tier
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from dateutil.parser import parse as parse_date
     
     # Check admin rights
     if user.get("tier") not in ["system_admin", "admin"]:
         raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
     
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         # Get target user
         target_user_row = conn.execute("""
             SELECT * FROM users WHERE user_id = ?
@@ -2146,10 +2708,13 @@ async def update_user(
             params.append(1 if is_active else 0)
         
         if updates:
+            # Queue write operation for user update
+            from ml_service.db.repositories import _queue_write
+            from ml_service.db.queue_manager import WriteOperation
+            set_clause = ", ".join(updates)
             params.append(user_id)
-            conn.execute(f"""
-                UPDATE users SET {', '.join(updates)} WHERE user_id = ?
-            """, params)
+            sql = f"UPDATE users SET {set_clause} WHERE user_id = ?"
+            _queue_write("users", WriteOperation.UPDATE, "users", sql, tuple(params))
         
         # Return updated user
         updated_row = conn.execute("""
@@ -2172,14 +2737,14 @@ async def delete_user(user_id: str, user: dict = AuthDep):
     Delete user (soft delete, admin only).
     """
     from ml_service.core.security import can_manage_user
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from ml_service.db.repositories import ApiTokenRepository
     
     # Check admin rights
     if user.get("tier") not in ["system_admin", "admin"]:
         raise HTTPException(status_code=403, detail="Access denied. Admin rights required.")
     
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         # Get target user
         target_user_row = conn.execute("""
             SELECT * FROM users WHERE user_id = ?
@@ -2227,13 +2792,13 @@ async def get_profile(user: dict = AuthDep):
     """
     Get current user profile.
     """
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from dateutil.parser import parse as parse_date
     
     user_id = user.get("user_id")
     username = user.get("username")
     
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         # Handle system_admin token case (user_id = "system_admin")
         if user_id == "system_admin":
             # Find system_admin user by username from settings
@@ -2274,27 +2839,34 @@ async def change_password(request: ChangePasswordRequest, user: dict = AuthDep):
     """
     Change user password.
     """
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from ml_service.db.repositories import ApiTokenRepository
+    from ml_service.core.security import verify_password, hash_password
+    from ml_service.db.repositories import _queue_write
+    from ml_service.db.queue_manager import WriteOperation
     
     user_id = user.get("user_id")
     
     # Check current password
-    password_hash = hashlib.sha256(request.current_password.encode()).hexdigest()
-    
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         user_row = conn.execute("""
             SELECT password_hash FROM users WHERE user_id = ? AND is_active = 1
         """, (user_id,)).fetchone()
         
-        if not user_row or user_row['password_hash'] != password_hash:
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Verify current password (supports both bcrypt and legacy SHA256)
+        if not verify_password(request.current_password, user_row['password_hash']):
             raise HTTPException(status_code=401, detail="Current password is incorrect")
         
-        # Update password
-        new_password_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
-        conn.execute("""
-            UPDATE users SET password_hash = ? WHERE user_id = ?
-        """, (new_password_hash, user_id))
+        # Update password with bcrypt
+        new_password_hash = hash_password(request.new_password)
+        
+        # Queue write operation
+        sql = "UPDATE users SET password_hash = ? WHERE user_id = ?"
+        params = (new_password_hash, user_id)
+        _queue_write("users", WriteOperation.UPDATE, "users", sql, params)
         
         # Revoke all sessions
         token_repo = ApiTokenRepository()
@@ -2566,6 +3138,53 @@ async def delete_token(token_id: str, user: dict = AuthDep):
     token_repo.delete(token_id)
     
     return {"status": "success", "message": "Token deleted successfully"}
+
+
+@router.get("/events/{event_id}")
+async def get_event_details(
+    event_id: str,
+    user: dict = AuthDep
+):
+    """Get detailed event information with structured data"""
+    from ml_service.db.repositories import EventRepository
+    
+    event_repo = EventRepository()
+    # Use efficient direct lookup instead of loading all events
+    event = event_repo.get(event_id)
+    
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Parse structured data from input_data and output_data
+    structured_data = {}
+    
+    try:
+        if event.input_data:
+            structured_data["input_data"] = json.loads(event.input_data) if isinstance(event.input_data, str) else event.input_data
+    except:
+        structured_data["input_data"] = event.input_data
+    
+    try:
+        if event.output_data:
+            structured_data["output_data"] = json.loads(event.output_data) if isinstance(event.output_data, str) else event.output_data
+    except:
+        structured_data["output_data"] = event.output_data
+    
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "status": event.status,
+        "stage": event.stage,
+        "created_at": event.created_at.isoformat() if event.created_at else None,
+        "completed_at": event.completed_at.isoformat() if event.completed_at else None,
+        "duration_ms": event.duration_ms,
+        "error_message": event.error_message,
+        "structured_data": structured_data,
+        "raw_data": {
+            "input_data": event.input_data,
+            "output_data": event.output_data
+        }
+    }
 
 
 @router.get("/models/{model_key}")

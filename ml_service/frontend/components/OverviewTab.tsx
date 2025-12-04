@@ -10,6 +10,7 @@ export default function OverviewTab() {
   const [stats, setStats] = useState<any>(null);
   const [models, setModels] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
+  const [databases, setDatabases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Determine if user is admin based on tier
@@ -34,14 +35,24 @@ export default function OverviewTab() {
     }
 
     try {
-      const [statsData, modelsData, jobsData] = await Promise.all([
+      const promises: Promise<any>[] = [
         api.getSchedulerStats(),
         api.getModels(),
         api.listJobs({ limit: 100 })
-      ]);
-      setStats(statsData);
-      setModels(modelsData.models || []);
-      setJobs(jobsData.jobs || []);
+      ];
+      
+      // Load databases info only for admins
+      if (isAdmin) {
+        promises.push(api.listDatabases());
+      }
+      
+      const results = await Promise.all(promises);
+      setStats(results[0]);
+      setModels(results[1].models || []);
+      setJobs(results[2].jobs || []);
+      if (isAdmin && results[3]) {
+        setDatabases(results[3].databases || []);
+      }
     } catch (error: any) {
       console.error('Failed to load data:', error);
       
@@ -419,6 +430,52 @@ export default function OverviewTab() {
           </div>
         )}
       </div>
+
+      {/* Database Status (for admins) */}
+      {isAdmin && databases.length > 0 && (
+        <div className={styles.row}>
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <h3>Databases</h3>
+            </div>
+            <div className={styles.cardContent}>
+              <div className={styles.statValue}>{databases.length}</div>
+              <div className={styles.statLabel}>Total Databases</div>
+            </div>
+          </div>
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Database Status</h3>
+            {databases.length === 0 ? (
+              <div className={styles.empty}>No databases found</div>
+            ) : (
+              <div className={styles.databasesList}>
+                {databases.map((db: any) => (
+                  <div key={db.name} className={styles.databaseItem}>
+                    <div className={styles.databaseHeader}>
+                      <strong>{db.name}</strong>
+                      <span className={`${styles.databaseStatus} ${
+                        db.status === 'online' || db.status === 'connected' ? styles.online :
+                        db.status === 'offline' ? styles.offline :
+                        db.status === 'reconnecting' || db.status === 'restarting' ? styles.reconnecting :
+                        db.status === 'locked' ? styles.locked :
+                        styles.error
+                      }`}>
+                        {db.status}
+                      </span>
+                    </div>
+                    <div className={styles.databaseInfo}>
+                      Path: {db.path}
+                    </div>
+                    <div className={styles.databaseInfo}>
+                      Tables: {db.tables?.length || 0}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

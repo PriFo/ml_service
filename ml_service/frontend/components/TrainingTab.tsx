@@ -10,6 +10,8 @@ export default function TrainingTab() {
   const [submitted, setSubmitted] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isRetrain, setIsRetrain] = useState(false);
+  const [baseVersion, setBaseVersion] = useState('');
   const [formData, setFormData] = useState({
     modelName: '',
     version: '',
@@ -30,6 +32,22 @@ export default function TrainingTab() {
   });
 
   const { job, loading } = useJob(jobId);
+
+  // Проверяем режим переобучения при монтировании
+  React.useEffect(() => {
+    const retrainModel = localStorage.getItem('retrainModel');
+    const retrainBaseVersion = localStorage.getItem('retrainBaseVersion');
+    if (retrainModel && retrainBaseVersion) {
+      setIsRetrain(true);
+      setBaseVersion(retrainBaseVersion);
+      setFormData(prev => ({
+        ...prev,
+        modelName: retrainModel
+      }));
+      localStorage.removeItem('retrainModel');
+      localStorage.removeItem('retrainBaseVersion');
+    }
+  }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -201,7 +219,9 @@ export default function TrainingTab() {
             </div>
             <div className={styles.frameContent}>
               <div className={styles.formGroup}>
-                <label>Model Name:</label>
+                <label className={styles.requiredLabel}>
+                  Model Name: <span className={styles.requiredStar}>*</span>
+                </label>
                 <input
                   type="text"
                   value={formData.modelName}
@@ -210,11 +230,14 @@ export default function TrainingTab() {
                   }
                   placeholder="e.g., my_classifier"
                   required
+                  className={styles.requiredInput}
                 />
               </div>
               
               <div className={styles.formGroup}>
-                <label>Version:</label>
+                <label className={styles.requiredLabel}>
+                  Version: <span className={styles.requiredStar}>*</span>
+                </label>
                 <input
                   type="text"
                   value={formData.version}
@@ -223,16 +246,20 @@ export default function TrainingTab() {
                   }
                   placeholder="v1.0.0"
                   required
+                  className={styles.requiredInput}
                 />
               </div>
 
               <div className={styles.formGroup}>
-                <label>Task Type:</label>
+                <label className={styles.requiredLabel}>
+                  Task Type: <span className={styles.requiredStar}>*</span>
+                </label>
                 <select
                   value={formData.taskType}
                   onChange={(e) =>
                     setFormData({ ...formData, taskType: e.target.value })
                   }
+                  className={styles.requiredInput}
                 >
                   <option value="classification">Classification</option>
                   <option value="regression">Regression</option>
@@ -248,12 +275,15 @@ export default function TrainingTab() {
             </div>
             <div className={styles.frameContent}>
               <div className={styles.formGroup}>
-                <label>Dataset File (JSON or CSV):</label>
+                <label className={styles.requiredLabel}>
+                  Dataset File (JSON or CSV): <span className={styles.requiredStar}>*</span>
+                </label>
                 <input
                   type="file"
                   accept=".json,.csv"
                   onChange={handleFileUpload}
                   required
+                  className={styles.requiredInput}
                 />
                 {formData.datasetName && (
                   <div className={styles.info}>
@@ -263,7 +293,9 @@ export default function TrainingTab() {
               </div>
 
               <div className={styles.formGroup}>
-                <label>Target Field:</label>
+                <label className={styles.requiredLabel}>
+                  Target Field: <span className={styles.requiredStar}>*</span>
+                </label>
                 <input
                   type="text"
                   value={formData.target}
@@ -272,11 +304,14 @@ export default function TrainingTab() {
                   }
                   placeholder="Column name for target"
                   required
+                  className={styles.requiredInput}
                 />
               </div>
 
               <div className={styles.formGroup}>
-                <label>Feature Fields (optional - auto-detected if empty):</label>
+                <label className={styles.optionalLabel}>
+                  Feature Fields <span className={styles.optionalText}>(optional - auto-detected if empty)</span>:
+                </label>
                 <input
                   type="text"
                   value={formData.features.join(', ')}

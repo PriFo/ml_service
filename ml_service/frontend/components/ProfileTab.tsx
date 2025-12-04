@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { useModal } from '@/lib/hooks/useModal';
+import { saveToken, getToken, getAllTokens, deleteToken as deleteStoredToken } from '@/lib/tokenStorage';
+import Modal from './Modal';
 import styles from './ProfileTab.module.css';
 
 interface Profile {
@@ -15,10 +18,12 @@ interface Profile {
 
 export default function ProfileTab() {
   const { state, dispatch } = useAppStore();
+  const { modal, showAlert, showError, showSuccess, showConfirm } = useModal();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'info' | 'password' | 'username' | 'tokens'>('info');
   const [tokens, setTokens] = useState<any[]>([]);
+  const [visibleTokens, setVisibleTokens] = useState<Set<string>>(new Set());
 
   // Form states
   const [currentPassword, setCurrentPassword] = useState('');
@@ -69,7 +74,19 @@ export default function ProfileTab() {
   const loadTokens = async () => {
     try {
       const response = await api.getTokens();
-      setTokens(response.tokens || []);
+      const tokensList = response.tokens || [];
+      
+      // Merge with stored tokens to get full token values
+      const storedTokens = getAllTokens();
+      const tokensWithValues = tokensList.map((token: any) => {
+        const stored = storedTokens.find(t => t.token_id === token.token_id);
+        return {
+          ...token,
+          full_token: stored?.token || null,
+        };
+      });
+      
+      setTokens(tokensWithValues);
     } catch (error: any) {
       console.error('Failed to load tokens:', error);
     }
@@ -78,28 +95,28 @@ export default function ProfileTab() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
-      alert('Новые пароли не совпадают');
+      await showError('Новые пароли не совпадают');
       return;
     }
     if (newPassword.length < 6) {
-      alert('Пароль должен содержать минимум 6 символов');
+      await showError('Пароль должен содержать минимум 6 символов');
       return;
     }
     try {
       await api.changePassword(currentPassword, newPassword);
-      alert('Пароль успешно изменен');
+      await showSuccess('Пароль успешно изменен');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
-      alert(`Ошибка изменения пароля: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка изменения пароля: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
   const handleChangeUsername = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newUsername === profile?.username) {
-      alert('Новое имя пользователя должно отличаться от текущего');
+      await showError('Новое имя пользователя должно отличаться от текущего');
       return;
     }
     try {
@@ -113,9 +130,9 @@ export default function ProfileTab() {
           tier: updatedProfile.tier,
         },
       });
-      alert('Имя пользователя успешно изменено');
+      await showSuccess('Имя пользователя успешно изменено');
     } catch (error: any) {
-      alert(`Ошибка изменения имени пользователя: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка изменения имени пользователя: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
@@ -123,40 +140,75 @@ export default function ProfileTab() {
     e.preventDefault();
     try {
       const response = await api.createToken(tokenName || undefined);
-      alert(`Токен создан! Сохраните его сейчас, он больше не будет показан:\n\n${response.token}`);
+      
+      // Save token to localStorage
+      saveToken(
+        response.token_id,
+        response.token,
+        tokenName || null,
+        response.created_at || new Date().toISOString()
+      );
+      
+      await showSuccess('Токен успешно создан и сохранен!');
       setTokenName('');
       await loadTokens();
     } catch (error: any) {
-      alert(`Ошибка создания токена: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка создания токена: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
   const handleRevokeToken = async (tokenId: string) => {
-    if (!confirm('Вы уверены, что хотите отозвать этот токен?')) {
+    const confirmed = await showConfirm('Вы уверены, что хотите отозвать этот токен?');
+    if (!confirmed) {
       return;
     }
     try {
       await api.revokeToken(tokenId);
       await loadTokens();
     } catch (error: any) {
-      alert(`Ошибка отзыва токена: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка отзыва токена: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
   const handleDeleteToken = async (tokenId: string) => {
-    if (!confirm('Вы уверены, что хотите удалить этот токен?')) {
+    const confirmed = await showConfirm('Вы уверены, что хотите удалить этот токен?');
+    if (!confirmed) {
       return;
     }
     try {
       await api.deleteToken(tokenId);
+      // Also delete from localStorage
+      deleteStoredToken(tokenId);
       await loadTokens();
     } catch (error: any) {
-      alert(`Ошибка удаления токена: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка удаления токена: ${error.message || 'Неизвестная ошибка'}`);
+    }
+  };
+
+  const toggleTokenVisibility = (tokenId: string) => {
+    setVisibleTokens(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(tokenId)) {
+        newSet.delete(tokenId);
+      } else {
+        newSet.add(tokenId);
+      }
+      return newSet;
+    });
+  };
+
+  const copyTokenToClipboard = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token);
+      await showSuccess('Токен скопирован в буфер обмена');
+    } catch (error) {
+      await showError('Не удалось скопировать токен');
     }
   };
 
   const handleDeleteProfile = async () => {
-    if (!confirm('Вы уверены, что хотите удалить свой профиль? Это действие необратимо!')) {
+    const confirmed = await showConfirm('Вы уверены, что хотите удалить свой профиль? Это действие необратимо!');
+    if (!confirmed) {
       return;
     }
     try {
@@ -166,7 +218,7 @@ export default function ProfileTab() {
         window.location.href = '/';
       }
     } catch (error: any) {
-      alert(`Ошибка удаления профиля: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка удаления профиля: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
@@ -185,8 +237,19 @@ export default function ProfileTab() {
   };
 
   return (
-    <div className={styles.profileTab}>
-      <div className={styles.header}>
+    <>
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onCancel={modal.onCancel}
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+      />
+      <div className={styles.profileTab}>
+        <div className={styles.header}>
         <h2>Мой профиль</h2>
       </div>
 
@@ -388,6 +451,36 @@ export default function ProfileTab() {
                         {token.expires_at && (
                           <div>Истекает: {new Date(token.expires_at).toLocaleString('ru-RU')}</div>
                         )}
+                        {token.full_token && (
+                          <div className={styles.tokenValueContainer}>
+                            <div className={styles.tokenLabel}>Токен:</div>
+                            <div className={styles.tokenValue}>
+                              {visibleTokens.has(token.token_id) ? (
+                                <code className={styles.tokenCode}>{token.full_token}</code>
+                              ) : (
+                                <code className={styles.tokenCode}>••••••••••••••••••••••••</code>
+                              )}
+                            </div>
+                            <div className={styles.tokenValueActions}>
+                              <button
+                                onClick={() => toggleTokenVisibility(token.token_id)}
+                                className={styles.toggleTokenButton}
+                                title={visibleTokens.has(token.token_id) ? 'Скрыть токен' : 'Показать токен'}
+                              >
+                                {visibleTokens.has(token.token_id) ? '👁️ Скрыть' : '👁️ Показать'}
+                              </button>
+                              {visibleTokens.has(token.token_id) && (
+                                <button
+                                  onClick={() => copyTokenToClipboard(token.full_token)}
+                                  className={styles.copyTokenButton}
+                                  title="Скопировать токен"
+                                >
+                                  📋 Копировать
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className={styles.tokenActions}>
@@ -413,7 +506,8 @@ export default function ProfileTab() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

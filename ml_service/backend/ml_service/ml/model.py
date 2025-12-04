@@ -22,16 +22,17 @@ logger = logging.getLogger(__name__)
 class MLModel:
     """MLPClassifier wrapper with GPU support"""
     
-    def __init__(self, model_key: str, version: str, features_config: Dict[str, Any]):
+    def __init__(self, model_key: str, version: str, features_config: Dict[str, Any], task_type: Optional[str] = None):
         self.model_key = model_key
         self.version = version
         self.features_config = features_config
+        self.task_type = task_type or features_config.get("task_type") or "unknown"
         self.vectorizer: Optional[TfidfVectorizer] = None
         self.vectorizers: Dict[str, TfidfVectorizer] = {}  # Per-field vectorizers
         self.encoder: Optional[LabelEncoder] = None
         self.scaler: Optional[StandardScaler] = None
         self.classifier: Optional[MLPClassifier] = None
-        self.feature_store = PerModelFeatureStore(model_key, version)
+        self.feature_store = PerModelFeatureStore(model_key, version, task_type=self.task_type)
         self.feature_field_order: List[str] = []  # Store order of feature fields
         self.backend: str = "sklearn"
     
@@ -814,7 +815,9 @@ class MLModel:
     
     def _save_model(self):
         """Save trained model to disk"""
-        model_path = Path(settings.ML_MODELS_PATH) / self.model_key / self.version
+        # Normalize task_type for path
+        task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+        model_path = Path(settings.ML_MODELS_PATH) / task_type_normalized / self.model_key / self.version
         model_path.mkdir(parents=True, exist_ok=True)
         
         model_file = model_path / "model.joblib"
@@ -824,12 +827,25 @@ class MLModel:
     
     def _load_model(self):
         """Load trained model from disk"""
-        model_path = Path(settings.ML_MODELS_PATH) / self.model_key / self.version
+        # Normalize task_type for path
+        task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+        
+        # Try new path first (with task_type)
+        model_path = Path(settings.ML_MODELS_PATH) / task_type_normalized / self.model_key / self.version
         model_file = model_path / "model.joblib"
+        
+        # If not found, try old path (backward compatibility)
+        if not model_file.exists():
+            old_model_path = Path(settings.ML_MODELS_PATH) / self.model_key / self.version
+            old_model_file = old_model_path / "model.joblib"
+            if old_model_file.exists():
+                model_file = old_model_file
+                logger.info(f"Loading model from old path (backward compatibility): {old_model_file}")
+            else:
+                logger.warning(f"Model file not found: {model_file} or {old_model_file}")
+                return
         
         if model_file.exists():
             self.classifier = joblib.load(model_file)
             logger.info(f"Model loaded from {model_file}")
-        else:
-            logger.warning(f"Model file not found: {model_file}")
 

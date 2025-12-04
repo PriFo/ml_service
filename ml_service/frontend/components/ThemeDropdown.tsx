@@ -6,7 +6,11 @@ import { themeManager } from '@/lib/theme';
 import type { Theme } from '@/lib/types';
 import styles from './ThemeDropdown.module.css';
 
-export default function ThemeDropdown() {
+interface ThemeDropdownProps {
+  isCollapsed?: boolean;
+}
+
+export default function ThemeDropdown({ isCollapsed = false }: ThemeDropdownProps) {
   const { state, dispatch } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -45,13 +49,14 @@ export default function ThemeDropdown() {
   return (
     <div className={styles.dropdown} ref={dropdownRef}>
       <button
-        className={styles.trigger}
+        className={`${styles.trigger} ${isCollapsed ? styles.collapsed : ''}`}
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Theme selector"
+        title={isCollapsed ? currentThemeData.label : undefined}
       >
         <span className={styles.triggerIcon}>{currentThemeData.icon}</span>
-        <span className={styles.triggerLabel}>{currentThemeData.label}</span>
-        <span className={styles.triggerArrow}>{isOpen ? '▲' : '▼'}</span>
+        {!isCollapsed && <span className={styles.triggerLabel}>{currentThemeData.label}</span>}
+        {!isCollapsed && <span className={styles.triggerArrow}>{isOpen ? '▲' : '▼'}</span>}
       </button>
 
       {isOpen && (

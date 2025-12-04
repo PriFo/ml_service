@@ -5,16 +5,23 @@ import { useAppStore } from '@/lib/store';
 import ThemeDropdown from './ThemeDropdown';
 import styles from './Sidebar.module.css';
 
-type TabType = 'overview' | 'models' | 'predict' | 'training' | 'jobs' | 'events' | 'users' | 'profile' | 'about';
+type TabType = 'overview' | 'models' | 'predict' | 'training' | 'jobs' | 'events' | 'users' | 'admin' | 'profile' | 'about';
 
 interface SidebarProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
+  onCollapseChange?: (isCollapsed: boolean) => void;
 }
 
-export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export default function Sidebar({ activeTab, onTabChange, onCollapseChange }: SidebarProps) {
   const { state, dispatch } = useAppStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleCollapse = () => {
+    const newCollapsed = !isCollapsed;
+    setIsCollapsed(newCollapsed);
+    onCollapseChange?.(newCollapsed);
+  };
 
   const isAdmin = state.userTier === 'admin' || state.userTier === 'system_admin';
 
@@ -26,6 +33,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'jobs', label: 'Jobs', icon: 'jobs' },
     { id: 'events', label: 'Events', icon: 'events' },
     ...(isAdmin ? [{ id: 'users' as TabType, label: 'Users', icon: 'users' }] : []),
+    ...(isAdmin ? [{ id: 'admin' as TabType, label: 'Admin', icon: 'admin' }] : []),
     ...(state.isAuthenticated ? [{ id: 'profile' as TabType, label: 'Profile', icon: 'profile' }] : []),
     { id: 'about', label: 'About', icon: 'about' },
   ];
@@ -44,7 +52,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <h1 className={styles.logo}>ML Service</h1>
         <button
           className={styles.collapseButton}
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={handleCollapse}
           aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {isCollapsed ? '→' : '←'}
@@ -66,7 +74,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       </nav>
 
       <div className={styles.sidebarFooter}>
-        <ThemeDropdown />
+        <ThemeDropdown isCollapsed={isCollapsed} />
         {state.isAuthenticated && (
           <button
             onClick={handleLogout}
@@ -91,6 +99,7 @@ function getIcon(iconName: string): string {
     jobs: '⚙',
     events: '⚡',
     users: '👥',
+    admin: '⚙',
     profile: '👤',
     about: 'ℹ',
     logout: '◄',

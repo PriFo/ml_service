@@ -49,8 +49,18 @@ class Settings(BaseSettings):
     ML_TRUST_PROXY: bool = True  # Trust proxy headers (X-Forwarded-*)
     
     # Database
-    ML_DB_PATH: str = "./ml_store.db"
+    ML_DB_PATH: str = "./ml_store.db"  # DEPRECATED: Legacy path, used only for migration
     ML_DB_TIMEOUT: int = 60  # Increased timeout to handle concurrent writes and locks
+    
+    # Separated databases paths
+    ML_DB_MODELS_PATH: str = "./databases/models.db"
+    ML_DB_USERS_PATH: str = "./databases/users.db"
+    ML_DB_LOGS_PATH: str = "./databases/logs.db"
+    
+    # Database queue settings
+    ML_DB_QUEUE_MAX_SIZE: int = 1000  # Maximum size of write queue per database
+    ML_DB_WRITE_TIMEOUT: int = 30  # Timeout for write operations in seconds
+    ML_DB_RECONNECT_DELAY: int = 5  # Delay between reconnection attempts in seconds
     
     # Artifacts
     ML_ARTIFACTS_ROOT: str = "./ml_artifacts"

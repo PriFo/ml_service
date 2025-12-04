@@ -123,3 +123,28 @@
   line-height: 1.4;
 }
 
+.databaseManager {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--color-bg-secondary, #ffffff);
+  border: 2px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.databaseManager h4 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid var(--color-primary, #6366f1);
+}
+
+.databaseManager h5 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+

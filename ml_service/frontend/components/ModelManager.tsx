@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { useModal } from '@/lib/hooks/useModal';
+import Modal from './Modal';
 import styles from './ModelManager.module.css';
 
 export default function ModelManager() {
   const { state, dispatch } = useAppStore();
+  const { modal, showAlert, showError, showSuccess } = useModal();
   const [activeTab, setActiveTab] = useState<'train' | 'view'>('train');
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(state.selectedModel);
   const [modelDetails, setModelDetails] = useState<any>(null);
@@ -73,7 +76,7 @@ export default function ModelManager() {
 
   const handleTrain = async () => {
     if (!trainingData.model_key || !trainingData.target_field || trainingData.items.length === 0) {
-      alert('Please fill in all required fields');
+      await showError('Пожалуйста, заполните все обязательные поля');
       return;
     }
 
@@ -93,7 +96,7 @@ export default function ModelManager() {
         items: trainingData.items,
       });
       
-      alert(`Training started! Job ID: ${response.job_id}`);
+      await showSuccess(`Обучение запущено! ID задачи: ${response.job_id}`);
       setTrainingData({
         model_key: '',
         version: '1.0.0',
@@ -112,7 +115,7 @@ export default function ModelManager() {
       const modelsResponse = await api.getModels();
       dispatch({ type: 'SET_MODELS', payload: modelsResponse.models });
     } catch (error) {
-      alert(`Training failed: ${(error as Error).message}`);
+      await showError(`Ошибка обучения: ${(error as Error).message}`);
     } finally {
       setIsTraining(false);
     }
@@ -175,7 +178,7 @@ export default function ModelManager() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const text = event.target?.result as string;
         let data: any[] = [];
@@ -187,16 +190,16 @@ export default function ModelManager() {
           if (Array.isArray(parsed)) {
             data = parsed;
           } else {
-            alert('Invalid JSON format. Expected JSON array.');
+            await showError('Неверный формат JSON. Ожидается массив JSON.');
             return;
           }
         } else {
-          alert('Unsupported file format. Please upload CSV or JSON file.');
+          await showError('Неподдерживаемый формат файла. Пожалуйста, загрузите CSV или JSON файл.');
           return;
         }
         
         if (data.length === 0) {
-          alert('File is empty or contains no valid data.');
+          await showError('Файл пуст или не содержит валидных данных.');
           return;
         }
         
@@ -206,15 +209,26 @@ export default function ModelManager() {
           feature_fields: data.length > 0 ? Object.keys(data[0]).filter(k => k !== prev.target_field) : [],
         }));
       } catch (error) {
-        alert(`Failed to parse file: ${(error as Error).message}`);
+        await showError(`Ошибка парсинга файла: ${(error as Error).message}`);
       }
     };
     reader.readAsText(file);
   };
 
   return (
-    <div className={styles.manager}>
-      <h2 className={styles.sectionTitle}>Model Management</h2>
+    <>
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onCancel={modal.onCancel}
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+      />
+      <div className={styles.manager}>
+        <h2 className={styles.sectionTitle}>Model Management</h2>
 
       <div className={styles.tabs}>
         <button
@@ -444,7 +458,7 @@ export default function ModelManager() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
 

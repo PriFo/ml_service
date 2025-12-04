@@ -8,9 +8,9 @@
 **Назначение**: Все скрипты запуска сервисов
 
 **Содержимое:**
-- `START_UNIFIED.bat` - Унифицированный запуск всех сервисов (Windows)
-- `start_unified.ps1` - PowerShell скрипт для унифицированного запуска
-- `START.bat` - Быстрый запуск
+- `START_ALL.bat` - Унифицированный запуск всех сервисов (Windows)
+- `start_all.ps1` - PowerShell скрипт для унифицированного запуска
+- `start_all.sh` - Bash скрипт для унифицированного запуска (Linux/Mac)
 - `run_backend.bat` / `run_backend.sh` - Запуск только backend
 - `run_frontend.bat` / `run_frontend.sh` - Запуск только frontend
 
@@ -158,7 +158,7 @@
 ```
 ml_service/
 ├── STARTUP/
-│   └── START_UNIFIED.bat
+│   └── START_ALL.bat
 ├── help_scripts/
 │   └── create_env.py
 ├── AIText/
@@ -170,7 +170,7 @@ ml_service/
 ### ❌ Неправильно:
 ```
 ml_service/
-├── START_UNIFIED.bat          # Должно быть в STARTUP/
+├── START_ALL.bat              # Должно быть в STARTUP/
 ├── create_env.py              # Должно быть в help_scripts/
 ├── ANALYSIS.md                # Должно быть в AIText/
 └── commit.bat                 # Должно быть в git_helper/

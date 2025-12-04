@@ -367,3 +367,65 @@
   text-align: center;
   color: #ef4444;
 }
+
+.databasesList {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.databaseItem {
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.databaseHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.databaseStatus {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.databaseStatus.online {
+  background-color: #10b981;
+  color: white;
+}
+
+.databaseStatus.offline {
+  background-color: #ef4444;
+  color: white;
+}
+
+.databaseStatus.reconnecting,
+.databaseStatus.restarting {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.databaseStatus.locked {
+  background-color: #8b5cf6;
+  color: white;
+}
+
+.databaseStatus.error {
+  background-color: #dc2626;
+  color: white;
+}
+
+.databaseInfo {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: 0.25rem;
+}

@@ -27,7 +27,13 @@ if [ ! -f "../.env" ]; then
         cp ../.env.example ../.env
     else
         echo "Creating .env from template..."
-        python3 ../create_env.py
+        if [ -f "../help_scripts/create_env.py" ]; then
+            python3 ../help_scripts/create_env.py
+        elif [ -f "../create_env.py" ]; then
+            python3 ../create_env.py
+        else
+            echo "WARNING: create_env.py not found!"
+        fi
     fi
     echo "WARNING: Edit .env file with your settings!"
     echo "Especially important to set ML_ADMIN_API_TOKEN!"

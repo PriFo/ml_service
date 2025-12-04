@@ -1,0 +1,236 @@
+.backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.modal {
+  background: var(--color-bg-secondary, #ffffff);
+  border-radius: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 1000px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--color-text-primary, #111827);
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: var(--color-text-secondary, #6b7280);
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.closeButton:hover {
+  background: var(--color-bg-primary, #f9fafb);
+}
+
+.content {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.section h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.25rem;
+  color: var(--color-text-primary, #111827);
+}
+
+.section h4 {
+  margin: 1rem 0 0.5rem 0;
+  font-size: 1rem;
+  color: var(--color-text-primary, #111827);
+}
+
+.infoTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.infoTable td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.infoTable td:first-child {
+  font-weight: 600;
+  width: 30%;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.errorText {
+  color: #ef4444;
+}
+
+.stats {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+}
+
+.tableSection {
+  margin-top: 1rem;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.dataTable th,
+.dataTable td {
+  padding: 0.75rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  text-align: left;
+}
+
+.dataTable th {
+  background: var(--color-bg-primary, #f9fafb);
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+
+.dataTable tbody tr {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.dataTable tbody tr:hover {
+  background: var(--color-bg-primary, #f9fafb);
+}
+
+.selectedRow {
+  background: var(--color-primary, #3b82f6) !important;
+  color: white;
+}
+
+.jsonCell {
+  margin: 0;
+  font-size: 0.75rem;
+  max-width: 300px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.jsonBlock {
+  margin: 0;
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.jsonSection {
+  margin-top: 1rem;
+}
+
+.metricsSection,
+.paramsSection {
+  margin-top: 1rem;
+}
+
+.metricsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.metricsTable td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.metricKey {
+  font-weight: 600;
+  width: 40%;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.metricValue {
+  font-family: monospace;
+}
+
+.detailView {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--color-bg-primary, #f9fafb);
+  border-radius: 8px;
+}
+
+.detailView h5 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #111827);
+}
+
+.detailView pre {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.footer .closeButton {
+  padding: 0.5rem 1.5rem;
+  font-size: 1rem;
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  border-radius: 6px;
+  width: auto;
+  height: auto;
+}
+
+.footer .closeButton:hover {
+  background: var(--color-primary-hover, #2563eb);
+}
+

@@ -130,8 +130,7 @@ export default function EventFeed() {
     };
 
     loadEvents();
-    const interval = setInterval(loadEvents, 5000); // Update every 5 seconds
-    return () => clearInterval(interval);
+    // Убрано автоматическое обновление - обновление только при ручном обновлении или при изменении alerts
   }, [state.alerts]);
 
   const getSeverityIcon = (severity: string) => {

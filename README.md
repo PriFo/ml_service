@@ -56,9 +56,9 @@ ml_service/
 │   │   └── package.json
 │   ├── datasets/             # Обучающие и тестовые датасеты
 │   ├── STARTUP/              # Скрипты запуска сервисов
-│   │   ├── START_UNIFIED.bat # Унифицированный запуск (Windows)
-│   │   ├── start_unified.ps1 # PowerShell скрипт
-│   │   ├── START.bat         # Быстрый запуск
+│   │   ├── START_ALL.bat      # Унифицированный запуск (Windows)
+│   │   ├── start_all.ps1      # PowerShell скрипт
+│   │   ├── start_all.sh       # Bash скрипт (Linux/Mac)
 │   │   ├── run_backend.bat/sh
 │   │   └── run_frontend.bat/sh
 │   ├── help_scripts/         # Вспомогательные скрипты
@@ -84,10 +84,7 @@ ml_service/
 ```bash
 # Запустить все сервисы (backend + frontend) в одном окне
 cd ml_service/STARTUP
-START_UNIFIED.bat
-
-# Или быстрый запуск:
-START.bat
+START_ALL.bat
 
 # Или по отдельности:
 run_backend.bat    # Только backend (порт 8085)
@@ -102,7 +99,7 @@ cd ml_service/STARTUP
 chmod +x *.sh
 
 # Запустить все сервисы
-./start_unified.ps1  # или через bash: bash start_unified.sh
+./start_all.sh
 
 # Или по отдельности:
 ./run_backend.sh    # Только backend (порт 8085)

@@ -128,6 +128,33 @@
   font-size: 0.875rem;
 }
 
+.requiredLabel {
+  font-weight: 700 !important;
+  color: var(--color-text-primary, #111827) !important;
+}
+
+.requiredStar {
+  color: #ef4444;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.requiredInput {
+  border-left: 3px solid var(--color-primary, #6366f1) !important;
+}
+
+.optionalLabel {
+  font-weight: 500 !important;
+  color: var(--color-text-secondary, #6b7280) !important;
+}
+
+.optionalText {
+  font-weight: 400;
+  font-style: italic;
+  font-size: 0.8em;
+  color: var(--color-text-secondary, #9ca3af);
+}
+
 .disabledForm {
   flex: 1;
   opacity: 0.5;

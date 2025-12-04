@@ -1,15 +1,24 @@
 @echo off
 REM Unified startup script for ML Service 0.9.1
+REM Combines functionality of START and START_UNIFIED
 REM Shows logs from both backend and frontend in the same window
+REM Press Ctrl+R to restart all services without closing terminal
 
 echo ========================================
 echo ML Service 0.9.1 - Unified Startup
 echo ========================================
 echo.
 
+REM Change to script directory
+cd /d "%~dp0"
+
+REM Go to project root (one level up from STARTUP)
+cd /d ".."
+
 REM Check if we are in the correct directory
 if not exist "backend" (
-    echo ERROR: Run this script from the project root ml_service/
+    echo ERROR: Cannot find backend directory
+    echo Expected structure: ml_service/backend and ml_service/frontend
     echo Current directory: %CD%
     pause
     exit /b 1
@@ -36,14 +45,19 @@ if not exist ".env" (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
     ) else (
-        if exist "create_env.py" (
-            python create_env.py
+        if exist "help_scripts\create_env.py" (
+            python help_scripts\create_env.py
+        ) else (
+            if exist "create_env.py" (
+                python create_env.py
+            )
         )
     )
     echo.
 )
 
-REM Run PowerShell script
-powershell -ExecutionPolicy Bypass -File "%~dp0start_unified.ps1"
+REM Run PowerShell script (from STARTUP directory)
+powershell -ExecutionPolicy Bypass -File "%~dp0start_all.ps1"
 
 pause
+

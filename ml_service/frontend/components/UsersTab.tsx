@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { useModal } from '@/lib/hooks/useModal';
+import Modal from './Modal';
 import styles from './UsersTab.module.css';
 
 interface User {
@@ -16,6 +18,7 @@ interface User {
 
 export default function UsersTab() {
   const { state, dispatch } = useAppStore();
+  const { modal, showAlert, showError, showConfirm } = useModal();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -81,7 +84,7 @@ export default function UsersTab() {
       setFormTier('user');
       await loadUsers();
     } catch (error: any) {
-      alert(`Ошибка создания пользователя: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка создания пользователя: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
@@ -95,19 +98,20 @@ export default function UsersTab() {
       setFormIsActive(true);
       await loadUsers();
     } catch (error: any) {
-      alert(`Ошибка обновления пользователя: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка обновления пользователя: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
   const handleDeleteUser = async (userId: string, username: string) => {
-    if (!confirm(`Вы уверены, что хотите удалить пользователя "${username}"?`)) {
+    const confirmed = await showConfirm(`Вы уверены, что хотите удалить пользователя "${username}"?`);
+    if (!confirmed) {
       return;
     }
     try {
       await api.deleteUser(userId);
       await loadUsers();
     } catch (error: any) {
-      alert(`Ошибка удаления пользователя: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Ошибка удаления пользователя: ${error.message || 'Неизвестная ошибка'}`);
     }
   };
 
@@ -143,8 +147,19 @@ export default function UsersTab() {
     : ['user', 'admin'];
 
   return (
-    <div className={styles.usersTab}>
-      <div className={styles.header}>
+    <>
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onCancel={modal.onCancel}
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+      />
+      <div className={styles.usersTab}>
+        <div className={styles.header}>
         <h2>Управление пользователями</h2>
         <button
           className={styles.createButton}
@@ -338,7 +353,8 @@ export default function UsersTab() {
           ))
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

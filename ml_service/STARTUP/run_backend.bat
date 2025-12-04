@@ -43,7 +43,15 @@ if not exist "..\.env" (
         copy ..\.env.example ..\.env
     ) else (
         echo Creating .env from template...
-        python ..\create_env.py
+        if exist "..\help_scripts\create_env.py" (
+            python ..\help_scripts\create_env.py
+        ) else (
+            if exist "..\create_env.py" (
+                python ..\create_env.py
+            ) else (
+                echo WARNING: create_env.py not found!
+            )
+        )
     )
     echo WARNING: Edit .env file with your settings!
     echo Especially important to set ML_ADMIN_API_TOKEN!

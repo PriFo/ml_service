@@ -73,8 +73,8 @@ def test_alert_repository(temp_db):
     assert len(active) == 1
     assert active[0].alert_id == "alert_123"
     
-    # Dismiss alert
-    repo.dismiss("alert_123")
+    # Dismiss alert (requires dismissed_by parameter)
+    repo.dismiss("alert_123", "test_user")
     active = repo.get_active()
     assert len(active) == 0
 

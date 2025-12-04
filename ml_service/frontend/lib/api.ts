@@ -281,6 +281,30 @@ export const api = {
     });
   },
 
+  // Database management (admin only)
+  listDatabases: () => httpRequest<{ databases: Array<{ name: string; path: string; status: string; tables: string[] }> }>('/admin/databases'),
+
+  listTables: (dbName: string) => httpRequest<{ tables: Array<{ name: string }> }>(`/admin/databases/${dbName}/tables`),
+
+  getTableData: (dbName: string, tableName: string, limit: number = 100, offset: number = 0) => {
+    return httpRequest<{ table: string; columns: string[]; data: any[]; total: number; limit: number; offset: number }>(
+      `/admin/databases/${dbName}/tables/${tableName}?limit=${limit}&offset=${offset}`
+    );
+  },
+
+  updateTableData: (dbName: string, tableName: string, data: any) => {
+    return httpRequest<{ status: string; message: string }>(`/admin/databases/${dbName}/tables/${tableName}`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  getDatabaseHealth: (dbName: string) => httpRequest<{ database: string; status: string; health: boolean }>(`/admin/databases/${dbName}/health`),
+
+  reconnectDatabase: (dbName: string) => httpRequest<{ database: string; status: string; current_status: string }>(`/admin/databases/${dbName}/reconnect`, {
+    method: 'POST',
+  }),
+
   cancelJob: (jobId: string) => {
     return httpRequest(`/jobs/${jobId}/cancel`, { method: 'POST' });
   },

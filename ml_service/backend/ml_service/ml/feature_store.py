@@ -14,10 +14,13 @@ logger = logging.getLogger(__name__)
 class PerModelFeatureStore:
     """Each model has independent feature store"""
     
-    def __init__(self, model_key: str, version: str):
+    def __init__(self, model_key: str, version: str, task_type: Optional[str] = None):
         self.model_key = model_key
         self.version = version
-        self.base_path = Path(settings.ML_FEATURES_PATH) / model_key / version
+        self.task_type = task_type or "unknown"
+        # Normalize task_type for path
+        task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+        self.base_path = Path(settings.ML_FEATURES_PATH) / task_type_normalized / model_key / version
         self.base_path.mkdir(parents=True, exist_ok=True)
     
     def save_features(
@@ -60,27 +63,47 @@ class PerModelFeatureStore:
         """Load features from disk"""
         features = {}
         
+        # Try new path first (with task_type)
         vectorizer_path = self.base_path / "vectorizer.pkl"
+        vectorizers_path = self.base_path / "vectorizers.pkl"
+        encoder_path = self.base_path / "encoder.pkl"
+        scaler_path = self.base_path / "scaler.pkl"
+        metadata_path = self.base_path / "metadata.json"
+        
+        # If not found, try old path (backward compatibility)
+        if not vectorizer_path.exists() and not vectorizers_path.exists():
+            task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+            old_base_path = Path(settings.ML_FEATURES_PATH) / self.model_key / self.version
+            old_vectorizer_path = old_base_path / "vectorizer.pkl"
+            old_vectorizers_path = old_base_path / "vectorizers.pkl"
+            old_encoder_path = old_base_path / "encoder.pkl"
+            old_scaler_path = old_base_path / "scaler.pkl"
+            old_metadata_path = old_base_path / "metadata.json"
+            
+            if old_vectorizer_path.exists() or old_vectorizers_path.exists():
+                logger.info(f"Loading features from old path (backward compatibility): {old_base_path}")
+                vectorizer_path = old_vectorizer_path
+                vectorizers_path = old_vectorizers_path
+                encoder_path = old_encoder_path
+                scaler_path = old_scaler_path
+                metadata_path = old_metadata_path
+        
         if vectorizer_path.exists():
             with open(vectorizer_path, "rb") as f:
                 features["vectorizer"] = pickle.load(f)
         
-        vectorizers_path = self.base_path / "vectorizers.pkl"
         if vectorizers_path.exists():
             with open(vectorizers_path, "rb") as f:
                 features["vectorizers"] = pickle.load(f)
         
-        encoder_path = self.base_path / "encoder.pkl"
         if encoder_path.exists():
             with open(encoder_path, "rb") as f:
                 features["encoder"] = pickle.load(f)
         
-        scaler_path = self.base_path / "scaler.pkl"
         if scaler_path.exists():
             with open(scaler_path, "rb") as f:
                 features["scaler"] = pickle.load(f)
         
-        metadata_path = self.base_path / "metadata.json"
         if metadata_path.exists():
             with open(metadata_path, "r") as f:
                 features["metadata"] = json.load(f)
@@ -101,7 +124,8 @@ class PerModelFeatureStore:
     
     def save_baseline_features(self, baseline_features: np.ndarray):
         """Save baseline features for drift detection"""
-        baseline_path = Path(settings.ML_BASELINES_PATH) / self.model_key / self.version
+        task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+        baseline_path = Path(settings.ML_BASELINES_PATH) / task_type_normalized / self.model_key / self.version
         baseline_path.mkdir(parents=True, exist_ok=True)
         
         baseline_file = baseline_path / "baseline_features.npy"
@@ -110,8 +134,17 @@ class PerModelFeatureStore:
     
     def load_baseline_features(self) -> Optional[np.ndarray]:
         """Load baseline features for drift detection"""
-        baseline_path = Path(settings.ML_BASELINES_PATH) / self.model_key / self.version
+        task_type_normalized = self.task_type.lower() if self.task_type else "unknown"
+        baseline_path = Path(settings.ML_BASELINES_PATH) / task_type_normalized / self.model_key / self.version
         baseline_file = baseline_path / "baseline_features.npy"
+        
+        # Try old path if not found (backward compatibility)
+        if not baseline_file.exists():
+            old_baseline_path = Path(settings.ML_BASELINES_PATH) / self.model_key / self.version
+            old_baseline_file = old_baseline_path / "baseline_features.npy"
+            if old_baseline_file.exists():
+                baseline_file = old_baseline_file
+                logger.info(f"Loading baseline from old path (backward compatibility): {old_baseline_file}")
         
         if baseline_file.exists():
             baseline_features = np.load(baseline_file)
