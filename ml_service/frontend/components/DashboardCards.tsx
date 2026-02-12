@@ -19,9 +19,10 @@ export default function DashboardCards() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const [modelsResponse, jobsResponse] = await Promise.all([
+        const [modelsResponse, jobsResponse, alertsResponse] = await Promise.all([
           api.getModels(),
           api.listJobs({ limit: 100 }),
+          api.getAlerts().catch(() => ({ alerts: [] })), // Fallback to empty array if fails
         ]);
 
         const jobs = jobsResponse.jobs || [];
@@ -29,8 +30,10 @@ export default function DashboardCards() {
         const completedJobs = jobs.filter(j => j.status === 'completed').length;
         const failedJobs = jobs.filter(j => j.status === 'failed').length;
 
-        const criticalAlerts = state.alerts.filter(a => a.severity === 'critical').length;
-        const warnings = state.alerts.filter(a => a.severity === 'warning').length;
+        // Use alerts from API response, not from state
+        const alerts = alertsResponse.alerts || [];
+        const criticalAlerts = alerts.filter(a => a.severity === 'critical').length;
+        const warnings = alerts.filter(a => a.severity === 'warning').length;
 
         setStats({
           totalModels: modelsResponse.models?.length || 0,
@@ -52,7 +55,7 @@ export default function DashboardCards() {
     loadStats();
     const interval = setInterval(loadStats, 10000); // Update every 10 seconds
     return () => clearInterval(interval);
-  }, [state.alerts]);
+  }, []);
 
   return (
     <div className={styles.cardsGrid}>

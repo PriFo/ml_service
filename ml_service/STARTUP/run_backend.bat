@@ -1,7 +1,7 @@
 @echo off
 REM Script to start backend on Windows
 echo ========================================
-echo ML Service 0.9.1 - Backend
+echo ML Service 0.11.2 - Backend
 echo ========================================
 echo.
 

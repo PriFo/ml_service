@@ -1,4 +1,4 @@
-# Unified startup script for ML Service 0.9.1
+# Unified startup script for ML Service 0.11.2
 # Shows logs from both backend and frontend in the same window
 # Press Ctrl+R to restart all services without closing terminal
 
@@ -14,7 +14,7 @@ function Start-Services {
     param([string]$path)
     
     Write-Host '========================================' -ForegroundColor Cyan
-    Write-Host 'ML Service 0.9.1 - Starting Services' -ForegroundColor Cyan
+    Write-Host 'ML Service 0.11.2 - Starting Services' -ForegroundColor Cyan
     Write-Host '========================================' -ForegroundColor Cyan
     Write-Host 'Backend:  http://localhost:8085' -ForegroundColor Green
     Write-Host 'Frontend: http://localhost:6565' -ForegroundColor Green

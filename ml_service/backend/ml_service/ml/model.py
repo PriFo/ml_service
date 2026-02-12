@@ -669,6 +669,15 @@ class MLModel:
                 self.backend = "sklearn"
         
         if self.backend == "sklearn" or self.classifier is None:
+            # Convert batch_size to int if it's a string number, or keep "auto"
+            batch_size_value = "auto"
+            if settings.ML_BATCH_SIZE != "auto":
+                try:
+                    batch_size_value = int(settings.ML_BATCH_SIZE)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid batch_size '{settings.ML_BATCH_SIZE}', using 'auto'")
+                    batch_size_value = "auto"
+            
             self.classifier = MLPClassifier(
                 hidden_layer_sizes=hidden_layer_sizes,
                 activation=settings.ML_ACTIVATION,
@@ -678,7 +687,7 @@ class MLModel:
                 alpha=alpha_value,
                 early_stopping=settings.ML_EARLY_STOPPING,
                 validation_fraction=settings.ML_VALIDATION_FRACTION,
-                batch_size=settings.ML_BATCH_SIZE if settings.ML_BATCH_SIZE != "auto" else "auto"
+                batch_size=batch_size_value
             )
         
         # Train
@@ -725,8 +734,14 @@ class MLModel:
         
         return metrics
     
-    def predict(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Make predictions with confidence scores"""
+    def predict(self, items: List[Dict[str, Any]], merge_output: bool = False) -> List[Dict[str, Any]]:
+        """Make predictions with confidence scores
+        
+        Args:
+            items: Input data for prediction
+            merge_output: If True, merge input fields with prediction into single object.
+                         If False, return standard format with input, prediction, confidence, all_scores.
+        """
         if not self.classifier:
             # Try to load model
             self._load_model()
@@ -772,6 +787,9 @@ class MLModel:
         else:
             predicted_labels = predictions
         
+        # Get target field name
+        target_field = self.features_config.get("target_field", "prediction")
+        
         # Format results
         results = []
         class_names = self.encoder.classes_ if self.encoder else [str(i) for i in range(probabilities.shape[1])]
@@ -780,17 +798,26 @@ class MLModel:
             # Get top predictions
             top_indices = np.argsort(probs)[::-1]
             
+            # Filter all_scores to only include non-zero values
             all_scores = {
                 class_names[idx]: float(probs[idx])
                 for idx in top_indices
+                if probs[idx] > 0
             }
             
-            results.append({
-                "input": items[i],
-                "prediction": str(pred),
-                "confidence": float(probs[top_indices[0]]),
-                "all_scores": all_scores
-            })
+            if merge_output:
+                # Merge input fields with prediction
+                result = items[i].copy()
+                result[target_field] = str(pred)
+                results.append(result)
+            else:
+                # Standard format with metadata
+                results.append({
+                    "input": items[i],
+                    "prediction": str(pred),
+                    "confidence": float(probs[top_indices[0]]),
+                    "all_scores": all_scores
+                })
         
         return results
     

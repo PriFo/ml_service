@@ -1,11 +1,15 @@
 """API routes"""
+from __future__ import annotations
+
 import uuid
 import time
 import asyncio
 import ast
 import logging
+import pickle
 from datetime import datetime, timedelta
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request, Header
 import json
 
@@ -39,6 +43,8 @@ from ml_service.db.models import PredictionLog, Event, Job
 from ml_service.ml.model import MLModel
 from ml_service.ml.validators import DataValidator
 from ml_service.core.config import settings
+from ml_service.core.cpu_manager import CPUManager
+from ml_service.core.training_optimizer import TrainingOptimizer
 from ml_service.core.request_source import (
     detect_request_source, get_client_ip, get_user_agent,
     parse_user_agent, get_user_system_info, calculate_data_size
@@ -83,6 +89,17 @@ def safe_parse_feature_fields(feature_fields_str: Optional[str]) -> List[str]:
     
     # If all parsing fails, return empty list
     return []
+
+
+def safe_json_loads(json_str: Optional[str]) -> Optional[Any]:
+    """Safely parse JSON string, return None on error"""
+    if not json_str:
+        return None
+    try:
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.warning(f"Failed to parse JSON: {e}")
+        return None
 
 
 async def process_training_job(job_id: str, request: TrainingRequest, event_id: Optional[str] = None):
@@ -162,24 +179,29 @@ async def process_training_job(job_id: str, request: TrainingRequest, event_id: 
                 # Remove parentheses if present
                 if hidden_layers_str.startswith('(') and hidden_layers_str.endswith(')'):
                     hidden_layers_str = hidden_layers_str[1:-1]
-                # Split by comma and convert to integers
-                hidden_layers_tuple = tuple(int(x.strip()) for x in hidden_layers_str.split(','))
-                logger.info(f"Parsed hidden_layers: {hidden_layers_tuple}")
+                # Split by comma, filter empty strings, and convert to integers
+                parts = [x.strip() for x in hidden_layers_str.split(',') if x.strip()]
+                if parts:
+                    hidden_layers_tuple = tuple(int(x) for x in parts)
+                    logger.info(f"Parsed hidden_layers: {hidden_layers_tuple}")
+                else:
+                    logger.warning(f"Empty hidden_layers after parsing '{request.hidden_layers}'. Using auto-detection.")
             except Exception as e:
                 logger.warning(f"Failed to parse hidden_layers '{request.hidden_layers}': {e}. Using auto-detection.")
         
-        # Train model
-        metrics = model.train(
-            items=request.items,
-            target_field=request.target_field,
-            feature_fields=request.feature_fields,
-            validation_split=request.validation_split,
-            use_gpu=request.use_gpu_if_available,
-            hidden_layers=hidden_layers_tuple,
-            max_iter=request.max_iter,
-            learning_rate_init=request.learning_rate_init,
-            alpha=request.alpha
-        )
+        # Train model with CPU affinity
+        with CPUManager.set_cpu_affinity("train_predict"):
+            metrics = model.train(
+                items=request.items,
+                target_field=request.target_field,
+                feature_fields=request.feature_fields,
+                validation_split=request.validation_split,
+                use_gpu=request.use_gpu_if_available,
+                hidden_layers=hidden_layers_tuple,
+                max_iter=request.max_iter,
+                learning_rate_init=request.learning_rate_init,
+                alpha=request.alpha
+            )
         
         # Save model to database
         db_model = Model(
@@ -451,47 +473,106 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
         if not valid_items:
             raise ValueError(f"No valid items for prediction. Total items: {len(request.data)}, Invalid: {len(invalid_items)}")
         
-        # Make predictions
+        # Make predictions with parallel processing
         job_repo.update_status(job_id, "running", stage="predicting")
         if event_repo and event_id:
             event_repo.update_status(event_id, "running", stage="predicting")
         
         try:
-            # Prepare features first for logging
+            # Get maximum number of workers for prediction (80% of CPU cores)
+            max_workers = CPUManager.get_max_workers_for_predict()
+            dataset_size = len(valid_items)
+            
+            # Determine if we should use parallel processing
+            # Use parallel processing if dataset is large enough to benefit from it
+            use_parallel = dataset_size > 100 and max_workers > 1
+            workers_used = max_workers if use_parallel else 1
+                
+            if use_parallel:
+                logger.info(f"Using parallel prediction with {max_workers} workers for {dataset_size} items")
+                
+                # Split dataset into chunks
+                chunk_size = max(1, dataset_size // max_workers)
+                chunks = []
+                for i in range(0, dataset_size, chunk_size):
+                    chunk = valid_items[i:i + chunk_size]
+                    if chunk:
+                        chunks.append((i, chunk))
+                
+                # Process chunks in parallel with CPU affinity
+                predictions = []
+                
+                def process_chunk(chunk_data):
+                    """Process a single chunk with CPU affinity"""
+                    with CPUManager.set_cpu_affinity("train_predict"):
+                        chunk_items = chunk_data[1]
+                        return ml_model.predict(chunk_items)
+                
+                # Use ThreadPoolExecutor for parallel processing
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all chunks
+                    future_to_chunk = {
+                        executor.submit(process_chunk, chunk): chunk[0] 
+                        for chunk in chunks
+                    }
+                    
+                    # Collect results in order
+                    chunk_results = {}
+                    for future in as_completed(future_to_chunk):
+                        chunk_start = future_to_chunk[future]
+                        try:
+                            chunk_predictions = future.result()
+                            chunk_results[chunk_start] = chunk_predictions
+                        except Exception as e:
+                            logger.error(f"Error processing chunk starting at {chunk_start}: {e}", exc_info=True)
+                            raise
+                    
+                    # Combine results in order
+                    for start_idx in sorted(chunk_results.keys()):
+                        predictions.extend(chunk_results[start_idx])
+            else:
+                # Sequential processing for small datasets
+                logger.info(f"Using sequential prediction for {dataset_size} items")
+                with CPUManager.set_cpu_affinity("train_predict"):
+                    predictions = ml_model.predict(valid_items)
+            
+            # Prepare features for logging (entire dataset as blob)
             X_features = None
             try:
                 X_features = ml_model._prepare_features(valid_items, fit=False)
             except Exception as feature_error:
                 logger.warning(f"Failed to prepare features for logging: {feature_error}")
             
-            # Make predictions
-            predictions = ml_model.predict(valid_items)
-            
-            # Log predictions for drift detection
+            # Log predictions for drift detection (single entry with entire dataset as blob)
             try:
                 log_repo = PredictionLogRepository()
-                import pickle
                 
-                for i, pred in enumerate(predictions):
-                    if X_features is not None and i < X_features.shape[0]:
-                        item_features = X_features[i:i+1]
-                        feature_bytes = pickle.dumps(item_features)
-                    else:
-                        feature_bytes = None
-                    
-                    log = PredictionLog(
-                        log_id=str(uuid.uuid4()),
-                        model_key=request.model_key,
-                        version=request.version or model.version,
-                        input_features=feature_bytes,
-                        prediction=pred.get("prediction"),
-                        confidence=pred.get("confidence"),
-                        created_at=datetime.now()
-                    )
-                    log_repo.create(log)
+                # Serialize entire input dataset as blob
+                input_features_blob = None
+                if X_features is not None:
+                    input_features_blob = pickle.dumps(X_features)
+                elif valid_items:
+                    # Fallback: serialize raw items if features unavailable
+                    input_features_blob = pickle.dumps(valid_items)
+                
+                # Serialize entire predictions result as blob
+                predictions_blob = pickle.dumps(predictions) if predictions else None
+                
+                # Create single log entry for entire dataset
+                log = PredictionLog(
+                    log_id=str(uuid.uuid4()),
+                    model_key=request.model_key,
+                    version=request.version or model.version,
+                    input_features=input_features_blob,
+                    prediction=predictions_blob,  # Now blob instead of string
+                    confidence=None,  # No single confidence value for batch
+                    created_at=datetime.now()
+                )
+                log_repo.create(log)
+                logger.info(f"Logged prediction batch: {len(valid_items)} items, {len(predictions)} predictions")
             except Exception as log_error:
-                logger.warning(f"Failed to log prediction for drift detection: {log_error}")
-        
+                logger.warning(f"Failed to log prediction for drift detection: {log_error}", exc_info=True)
+            
         except ValueError as e:
             raise ValueError(str(e))
         except Exception as e:
@@ -501,28 +582,38 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
         processing_time = int((time.time() - start_time) * 1000)
         
         # Prepare structured output data for events
+        # Predictions are already in correct format (list of dicts)
+        # Limit the number of items shown in output_data to prevent JSON size issues
+        MAX_ITEMS_IN_OUTPUT = 1000  # Limit to first 1000 items for display
+        
         # Use zip to safely pair valid_items with predictions
+        processed_items_list = []
+        for valid_item, pred in zip(valid_items[:MAX_ITEMS_IN_OUTPUT], predictions[:MAX_ITEMS_IN_OUTPUT]):
+            processed_items_list.append({
+                "input": valid_item,
+                "prediction": pred.get("prediction") if isinstance(pred, dict) else str(pred),
+                "confidence": pred.get("confidence") if isinstance(pred, dict) else None,
+                "all_scores": pred.get("all_scores") if isinstance(pred, dict) else None
+            })
+        
         structured_output = {
-            "processed_items": [
-                {
-                    "input": valid_item,
-                    "prediction": pred.get("prediction"),
-                    "confidence": pred.get("confidence")
-                }
-                for valid_item, pred in zip(valid_items, predictions)
-            ],
+            "processed_items": processed_items_list,
+            "total_processed": len(predictions),
+            "items_shown": min(len(predictions), MAX_ITEMS_IN_OUTPUT),
+            "has_more_items": len(predictions) > MAX_ITEMS_IN_OUTPUT,
             "invalid_items": [
                 {
                     "input": item.get("input") if isinstance(item, dict) else item,
                     "reason": item.get("reason") if isinstance(item, dict) else "Validation failed"
                 }
-                for item in (invalid_items or [])
+                for item in (invalid_items or [])[:100]  # Limit invalid items too
             ],
             "processing_stats": {
                 "total": len(request.data),
                 "processed": len(predictions),
                 "invalid": len(invalid_items) if invalid_items else 0,
-                "success_rate": len(predictions) / len(request.data) if request.data else 0
+                "success_rate": len(predictions) / len(request.data) if request.data else 0,
+                "parallel_workers_used": workers_used
             },
             "processing_time_ms": processing_time
         }
@@ -537,13 +628,32 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
         # Update job status with results
         job_repo.update_status(job_id, "completed", metrics=result_data, stage="completed")
         if event_repo and event_id:
-            event_repo.update_status(
-                event_id,
-                "completed",
-                stage="completed",
-                output_data=json.dumps(structured_output),
-                duration_ms=processing_time
-            )
+            try:
+                # Serialize structured_output to JSON
+                output_data_json = json.dumps(structured_output, default=str)
+                event_repo.update_status(
+                    event_id,
+                    "completed",
+                    stage="completed",
+                    output_data=output_data_json,
+                    duration_ms=processing_time
+                )
+            except Exception as json_error:
+                logger.error(f"Failed to serialize output_data to JSON: {json_error}", exc_info=True)
+                # Fallback: save summary only
+                event_repo.update_status(
+                    event_id,
+                    "completed",
+                    stage="completed",
+                    output_data=json.dumps({
+                        "error": "Failed to serialize full output",
+                        "summary": {
+                            "total_processed": len(predictions),
+                            "processing_time_ms": processing_time
+                        }
+                    }),
+                    duration_ms=processing_time
+                )
         
     except Exception as e:
         logger.error(f"Prediction job {job_id} failed: {e}", exc_info=True)
@@ -559,6 +669,76 @@ async def process_predict_job(job_id: str, request: PredictionRequest, event_id:
                 error_message=error_msg
             )
         # Don't re-raise to prevent background task from crashing
+
+
+@router.post("/training/recommend-params")
+async def recommend_training_params(
+    request: TrainingRequest,
+    user: dict = AuthDep
+):
+    """
+    Get recommended training parameters based on dataset analysis.
+    This endpoint analyzes the provided dataset and returns optimal parameters.
+    """
+    try:
+        # Validate that we have data to analyze
+        if not request.items or len(request.items) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No training data provided. Please provide at least one item for analysis."
+            )
+        
+        # Check target field
+        sample_item = request.items[0]
+        available_fields = set(sample_item.keys())
+        
+        if request.target_field not in available_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Target field '{request.target_field}' not found in data. "
+                       f"Available fields: {', '.join(sorted(available_fields))}"
+            )
+        
+        # Auto-detect feature fields if not provided
+        feature_fields = request.feature_fields
+        if feature_fields is None or len(feature_fields) == 0:
+            feature_fields = [f for f in available_fields if f != request.target_field]
+            if len(feature_fields) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No feature fields available. Target field '{request.target_field}' is the only field in data."
+                )
+        
+        # Get recommended parameters
+        recommended = TrainingOptimizer.get_recommended_params(
+            items=request.items,
+            target_field=request.target_field,
+            feature_fields=feature_fields
+        )
+        
+        # Format response
+        return {
+            "recommended_params": {
+                "hidden_layers": ",".join(map(str, recommended["hidden_layers"])),
+                "batch_size": recommended["batch_size"],
+                "validation_split": recommended["validation_split"],
+                "max_iter": recommended["max_iter"],
+                "learning_rate_init": recommended["learning_rate_init"],
+                "alpha": recommended["alpha"],
+                "early_stopping": recommended["early_stopping"]
+            },
+            "dataset_stats": recommended["dataset_stats"],
+            "feature_fields": feature_fields
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error recommending training parameters: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to analyze dataset and recommend parameters: {str(e)}"
+        )
 
 
 @router.post("/train", response_model=TrainingResponse)
@@ -875,8 +1055,9 @@ async def predict(
         
         # Log event
         event_repo = EventRepository()
+        event_id = str(uuid.uuid4())
         event = Event(
-            event_id=str(uuid.uuid4()),
+            event_id=event_id,
             event_type="predict",
             source=source,
             model_key=request.model_key,
@@ -884,7 +1065,8 @@ async def predict(
             stage="queued",
             input_data=json.dumps({
                 "model_key": request.model_key,
-                "version": request.version,
+                "version": request.version or model.version,
+                "job_id": job_id,
                 "data_count": len(request.data)
             }),
             client_ip=client_ip,
@@ -894,7 +1076,7 @@ async def predict(
         event_repo.create(event)
         
         # Note: Background task will be handled by scheduler/worker pool
-        background_tasks.add_task(process_predict_job, job_id, request, event.event_id)
+        background_tasks.add_task(process_predict_job, job_id, request, event_id)
         
         return PredictionJobResponse(
             job_id=job_id,
@@ -1306,6 +1488,39 @@ async def list_models(user: dict = AuthDep):
     return {"models": response_models}
 
 
+@router.get("/models/{model_key}")
+async def get_model(
+    model_key: str,
+    version: Optional[str] = None,
+    user: dict = AuthDep
+):
+    """
+    Get model details by key and optional version.
+    Returns feature_fields, target_field, and other model information.
+    """
+    model_repo = ModelRepository()
+    model = model_repo.get(model_key, version)
+    
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # Parse feature_fields using the same safe parsing function
+    feature_fields_parsed = safe_parse_feature_fields(model.feature_fields)
+    
+    return {
+        "model_key": model.model_key,
+        "version": model.version,
+        "status": model.status,
+        "accuracy": model.accuracy,
+        "last_trained": model.last_trained.isoformat() if model.last_trained else None,
+        "created_at": model.created_at.isoformat() if model.created_at else None,
+        "last_updated": model.last_updated.isoformat() if model.last_updated else None,
+        "task_type": model.task_type,
+        "target_field": model.target_field,
+        "feature_fields": json.dumps(feature_fields_parsed) if feature_fields_parsed else model.feature_fields
+    }
+
+
 @router.delete("/models/{model_key}")
 async def delete_model(
     model_key: str,
@@ -1600,7 +1815,7 @@ async def health_check():
     """Health check endpoint (no auth required)"""
     return {
         "status": "healthy",
-        "version": "0.9.1",
+        "version": "0.11.2",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -1647,8 +1862,8 @@ async def get_events(
             "model_key": event.model_key,
             "status": event.status,
             "stage": event.stage,
-            "input_data": json.loads(event.input_data) if event.input_data else None,
-            "output_data": json.loads(event.output_data) if event.output_data else None,
+            "input_data": safe_json_loads(event.input_data),
+            "output_data": safe_json_loads(event.output_data),
             "user_agent": event.user_agent,
             "client_ip": event.client_ip,
             "created_at": event.created_at.isoformat() if event.created_at else None,
@@ -1718,8 +1933,8 @@ async def get_suspicious_events(
             model_key=event.model_key,
             status=event.status,
             stage=event.stage,
-            input_data=json.loads(event.input_data) if event.input_data else None,
-            output_data=json.loads(event.output_data) if event.output_data else None,
+            input_data=safe_json_loads(event.input_data),
+            output_data=safe_json_loads(event.output_data),
             user_agent=event.user_agent,
             client_ip=event.client_ip,
             created_at=event.created_at or datetime.now(),
@@ -1750,8 +1965,8 @@ async def get_events_by_ip(
             model_key=event.model_key,
             status=event.status,
             stage=event.stage,
-            input_data=json.loads(event.input_data) if event.input_data else None,
-            output_data=json.loads(event.output_data) if event.output_data else None,
+            input_data=safe_json_loads(event.input_data),
+            output_data=safe_json_loads(event.output_data),
             user_agent=event.user_agent,
             client_ip=event.client_ip,
             created_at=event.created_at or datetime.now(),
@@ -2277,16 +2492,12 @@ async def migrate_users_force(user: dict = AuthDep):
     
     from ml_service.db.migrations import migrate_to_separated_databases
     from ml_service.db.connection import db_manager
-    from pathlib import Path
-    from ml_service.core.config import settings
     
-    # Check if legacy DB exists
-    legacy_db_path = Path(settings.ML_DB_PATH)
-    if not legacy_db_path.exists():
-        return {
-            "status": "skipped",
-            "message": "Legacy database not found"
-        }
+    # Legacy database support has been removed
+    return {
+        "status": "skipped",
+        "message": "Legacy database support has been removed"
+    }
     
     # Check current user count
     with db_manager.users_db.get_connection() as conn:
@@ -2324,7 +2535,6 @@ async def login(request: LoginRequest):
     Returns authentication token.
     Access: Public (available to all users)
     """
-    from ml_service.db.connection import db
     from ml_service.db.repositories import ApiTokenRepository
     from ml_service.db.models import ApiToken
     from ml_service.core.security import generate_token, hash_token, verify_password
@@ -2880,13 +3090,13 @@ async def change_username(request: ChangeUsernameRequest, user: dict = AuthDep):
     """
     Change username.
     """
-    from ml_service.db.connection import db
+    from ml_service.db.connection import db_manager
     from dateutil.parser import parse as parse_date
     
     user_id = user.get("user_id")
     
     # Check if new username is unique
-    with db.get_connection() as conn:
+    with db_manager.users_db.get_connection() as conn:
         existing_user = conn.execute("""
             SELECT user_id FROM users WHERE username = ? AND user_id != ?
         """, (request.new_username, user_id)).fetchone()

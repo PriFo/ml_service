@@ -27,6 +27,7 @@ type Action =
   | { type: 'SET_THEME'; payload: Theme }
   | { type: 'SELECT_MODEL'; payload: string | null }
   | { type: 'SET_MODELS'; payload: Model[] }
+  | { type: 'SET_ALERTS'; payload: Alert[] }
   | { type: 'ADD_ALERT'; payload: Alert }
   | { type: 'REMOVE_ALERT'; payload: string }
   | { type: 'SET_DRIFT_DATA'; payload: DriftReport[] }
@@ -47,6 +48,9 @@ function appReducer(state: AppState, action: Action): AppState {
     
     case 'SET_MODELS':
       return { ...state, models: action.payload };
+    
+    case 'SET_ALERTS':
+      return { ...state, alerts: action.payload };
     
     case 'ADD_ALERT':
       return { ...state, alerts: [...state.alerts, action.payload] };

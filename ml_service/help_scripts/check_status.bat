@@ -1,7 +1,7 @@
 @echo off
 REM Script to check service status
 echo ========================================
-echo ML Service 0.9.1 - Status Check
+echo ML Service 0.11.2 - Status Check
 echo ========================================
 echo.
 

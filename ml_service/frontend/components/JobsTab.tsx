@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { useModal } from '@/lib/hooks/useModal';
+import Modal from './Modal';
 import JobCard from './JobCard';
 import styles from './JobsTab.module.css';
 
@@ -17,6 +19,7 @@ interface Job {
 
 export default function JobsTab() {
   const { state, dispatch } = useAppStore();
+  const { modal, showConfirm, showError, showSuccess } = useModal();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filters, setFilters] = useState({
     type: 'all',
@@ -117,8 +120,19 @@ export default function JobsTab() {
       return;
     }
 
+    const job = jobs.find(j => j.job_id === jobId);
+    const jobType = job?.job_type || job?.type || 'задание';
+    const confirmed = await showConfirm(
+      `Вы уверены, что хотите отменить ${jobType} задание "${jobId}"?`,
+      'Подтверждение отмены'
+    );
+    if (!confirmed) {
+      return;
+    }
+
     try {
       await api.cancelJob(jobId);
+      await showSuccess('Задание успешно отменено');
       loadJobs();
     } catch (error: any) {
       console.error('Failed to cancel job:', error);
@@ -135,13 +149,26 @@ export default function JobsTab() {
         if (typeof window !== 'undefined') {
           window.location.href = '/';
         }
+      } else {
+        await showError(`Не удалось отменить задание: ${error.message || 'Неизвестная ошибка'}`);
       }
     }
   };
 
   return (
-    <div className={styles.jobsTab}>
-      <div className={styles.filtersPanel}>
+    <>
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onCancel={modal.onCancel}
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+      />
+      <div className={styles.jobsTab}>
+        <div className={styles.filtersPanel}>
         <div className={styles.filterGroup}>
           <label>Type:</label>
           <select
@@ -258,7 +285,8 @@ export default function JobsTab() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

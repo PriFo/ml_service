@@ -2,7 +2,7 @@
 # Script to start backend on Linux/Mac
 
 echo "========================================"
-echo "ML Service 0.9.1 - Backend"
+echo "ML Service 0.11.2 - Backend"
 echo "========================================"
 
 cd backend

@@ -120,9 +120,9 @@ class PredictionLog:
     log_id: str
     model_key: str
     version: str
-    input_features: Optional[bytes] = None  # Serialized numpy array
-    prediction: Optional[str] = None
-    confidence: Optional[float] = None
+    input_features: Optional[bytes] = None  # Serialized input dataset (blob)
+    prediction: Optional[bytes] = None  # Serialized prediction results (blob)
+    confidence: Optional[float] = None  # Deprecated: no single confidence for batch predictions
     created_at: Optional[datetime] = None
 
 

@@ -10,7 +10,9 @@ services:
     environment:
       - ML_SERVICE_HOST=0.0.0.0
       - ML_SERVICE_PORT=8085
-      - ML_DB_PATH=/data/ml_store.db
+      - ML_DB_MODELS_PATH=/data/models.db
+      - ML_DB_USERS_PATH=/data/users.db
+      - ML_DB_LOGS_PATH=/data/logs.db
       - ML_ARTIFACTS_ROOT=/app/ml_artifacts
       - ML_ADMIN_API_TOKEN=${ML_ADMIN_API_TOKEN:-your_secret_token_min_32_chars}
     volumes:

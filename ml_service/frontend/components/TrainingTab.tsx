@@ -20,6 +20,7 @@ export default function TrainingTab() {
     datasetName: '',
     items: [] as any[],
     features: [] as string[],
+    featuresText: '', // Store raw text input for feature fields
     target: '',
     batchSize: 'auto',
     useGpu: false,
@@ -90,15 +91,18 @@ export default function TrainingTab() {
         // Auto-detect available fields from data
         const availableFields = data.length > 0 ? Object.keys(data[0]) : [];
         
+        // Auto-fill features if not set (all fields except target if target is set)
+        const autoFeatures = formData.features.length === 0 && formData.target 
+          ? availableFields.filter(f => f !== formData.target)
+          : formData.features;
+        
         setFormData({ 
           ...formData, 
           items: data, 
           dataset: file, 
           datasetName: file.name,
-          // Auto-fill features if not set (all fields except target if target is set)
-          features: formData.features.length === 0 && formData.target 
-            ? availableFields.filter(f => f !== formData.target)
-            : formData.features
+          features: autoFeatures,
+          featuresText: autoFeatures.join(', ')
         });
         setError(null);
       } catch (err) {
@@ -314,14 +318,27 @@ export default function TrainingTab() {
                 </label>
                 <input
                   type="text"
-                  value={formData.features.join(', ')}
-                  onChange={(e) =>
+                  value={formData.featuresText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    // Update both text and parsed array
                     setFormData({
                       ...formData,
-                      features: e.target.value.split(',').map(f => f.trim()).filter(f => f),
-                    })
-                  }
-                  placeholder="Leave empty to use all fields except target"
+                      featuresText: text,
+                      features: text ? text.split(',').map(f => f.trim()).filter(f => f) : [],
+                    });
+                  }}
+                  onBlur={(e) => {
+                    // On blur, ensure the text is properly formatted
+                    const text = e.target.value;
+                    const parsed = text ? text.split(',').map(f => f.trim()).filter(f => f) : [];
+                    setFormData({
+                      ...formData,
+                      featuresText: parsed.join(', '),
+                      features: parsed,
+                    });
+                  }}
+                  placeholder="e.g., field1, field2, field3"
                 />
                 {formData.items.length > 0 && (
                   <div className={styles.info}>

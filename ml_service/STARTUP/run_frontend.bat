@@ -1,7 +1,7 @@
 @echo off
 REM Script to start frontend on Windows
 echo ========================================
-echo ML Service 0.9.1 - Frontend
+echo ML Service 0.11.2 - Frontend
 echo ========================================
 echo.
 

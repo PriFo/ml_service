@@ -1,11 +1,11 @@
 @echo off
-REM Unified startup script for ML Service 0.9.1
+REM Unified startup script for ML Service 0.11.2
 REM Combines functionality of START and START_UNIFIED
 REM Shows logs from both backend and frontend in the same window
 REM Press Ctrl+R to restart all services without closing terminal
 
 echo ========================================
-echo ML Service 0.9.1 - Unified Startup
+echo ML Service 0.11.2 - Unified Startup
 echo ========================================
 echo.
 

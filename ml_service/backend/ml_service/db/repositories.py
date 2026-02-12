@@ -21,7 +21,11 @@ def _queue_write(db_name: str, operation: WriteOperation, table: str, sql: str, 
     """Helper function to queue write operations"""
     db = getattr(db_manager, f"{db_name}_db", None)
     if db:
-        db.queue_write(operation, table, {"sql": sql, "params": params})
+        success = db.queue_write(operation, table, {"sql": sql, "params": params})
+        if not success:
+            # Queue is full - log warning but don't block
+            logger.warning(f"Failed to queue write operation for {db_name}.{table} - queue is full. Operation will be retried later.")
+            # Optionally: retry with exponential backoff or use synchronous write for critical operations
     else:
         logger.error(f"Database {db_name} not found")
 
@@ -593,8 +597,8 @@ class PredictionLogRepository:
                     log_id=row['log_id'],
                     model_key=row['model_key'],
                     version=row['version'],
-                    input_features=row['input_features'],
-                    prediction=row['prediction'],
+                    input_features=row['input_features'],  # Already bytes (BLOB)
+                    prediction=row['prediction'] if isinstance(row['prediction'], bytes) else None,  # BLOB
                     confidence=row['confidence'],
                     created_at=parse_date(row['created_at']) if row['created_at'] else None
                 )
@@ -901,20 +905,21 @@ class PredictEventRepository:
     def create(self, event_id: str, model_key: str, version: Optional[str], job_id: Optional[str],
                status: str, input_size: Optional[int], output_size: Optional[int],
                error_message: Optional[str], duration_ms: Optional[int], data_size_bytes: Optional[int],
-               client_ip: Optional[str], user_agent: Optional[str]) -> bool:
+               client_ip: Optional[str], user_agent: Optional[str], stage: Optional[str] = None,
+               input_data: Optional[str] = None, output_data: Optional[str] = None) -> bool:
         """Create a new predict event"""
         sql = """
             INSERT INTO predict_events (
-                event_id, model_key, version, job_id, status, input_size, output_size,
+                event_id, model_key, version, job_id, status, stage, input_size, output_size,
                 error_message, created_at, completed_at, duration_ms, data_size_bytes,
-                client_ip, user_agent
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                client_ip, user_agent, input_data, output_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         completed_at = datetime.now() if status in ("completed", "failed") else None
         params = (
-            event_id, model_key, version, job_id, status, input_size, output_size,
+            event_id, model_key, version, job_id, status, stage, input_size, output_size,
             error_message, datetime.now(), completed_at, duration_ms, data_size_bytes,
-            client_ip, user_agent
+            client_ip, user_agent, input_data, output_data
         )
         _queue_write("logs", WriteOperation.CREATE, "predict_events", sql, params)
         return True
@@ -1076,10 +1081,35 @@ class EventRepository:
                 event.duration_ms, event.data_size_bytes
             )
         elif "predict" in event_type or event.source == "prediction":
+            # Extract version and job_id from input_data if available
+            version = None
+            job_id = None
+            input_size = None
+            if event.input_data:
+                try:
+                    input_data_dict = json.loads(event.input_data) if isinstance(event.input_data, str) else event.input_data
+                    version = input_data_dict.get("version")
+                    job_id = input_data_dict.get("job_id")
+                    data_count = input_data_dict.get("data_count")
+                    if data_count:
+                        input_size = data_count
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            # Serialize input_data and output_data to JSON strings if they are dicts
+            input_data_str = event.input_data
+            if input_data_str and not isinstance(input_data_str, str):
+                input_data_str = json.dumps(input_data_str)
+            
+            output_data_str = event.output_data
+            if output_data_str and not isinstance(output_data_str, str):
+                output_data_str = json.dumps(output_data_str)
+            
             PredictEventRepository().create(
-                event.event_id, event.model_key or "", None, None,
-                event.status, None, None, event.error_message,
-                event.duration_ms, event.data_size_bytes, event.client_ip, event.user_agent
+                event.event_id, event.model_key or "", version, job_id,
+                event.status, input_size, None, event.error_message,
+                event.duration_ms, event.data_size_bytes, event.client_ip, event.user_agent,
+                event.stage, input_data_str, output_data_str
             )
         elif "login" in event_type or event.source == "auth":
             LoginEventRepository().create(
@@ -1117,22 +1147,61 @@ class EventRepository:
             with db_manager.logs_db.get_connection() as conn:
                 row = conn.execute(f"SELECT * FROM {table_name} WHERE event_id = ?", (event_id,)).fetchone()
                 if row:
-                    return self._row_to_event(dict(row))
+                    return self._row_to_event(dict(row), table_name=table_name)
         return None
     
-    def _row_to_event(self, row_dict: dict) -> Event:
+    def _row_to_event(self, row_dict: dict, table_name: Optional[str] = None) -> Event:
         """Convert database row to Event object"""
+        # Determine event_type and source based on table_name if not in row_dict
+        event_type = row_dict.get('event_type')
+        if not event_type and table_name:
+            if table_name == "predict_events":
+                event_type = "predict"
+            elif table_name == "train_events":
+                event_type = "train"
+            elif table_name == "alert_events":
+                event_type = "alert"
+            elif table_name == "login_events":
+                event_type = "login"
+            elif table_name == "system_events":
+                event_type = "system"
+            elif table_name == "drift_events":
+                event_type = "drift"
+            elif table_name == "job_events":
+                event_type = "job"
+        
+        # Extract input_data and output_data based on table type
+        input_data = None
+        output_data = None
+        
+        if table_name == "predict_events":
+            input_data = row_dict.get('input_data')
+            output_data = row_dict.get('output_data')
+        elif table_name == "train_events":
+            input_data = row_dict.get('input_data')
+            output_data = row_dict.get('metrics')
+        elif table_name == "alert_events":
+            input_data = row_dict.get('message')
+            output_data = row_dict.get('details')
+        elif table_name == "system_events":
+            input_data = row_dict.get('message')
+            output_data = row_dict.get('details')
+        else:
+            # Fallback for other tables
+            input_data = row_dict.get('input_data') or row_dict.get('message') or row_dict.get('details')
+            output_data = row_dict.get('output_data') or row_dict.get('metrics') or row_dict.get('details')
+        
         return Event(
             event_id=row_dict['event_id'],
-            event_type=row_dict['event_type'],
-            source=row_dict['source'],
+            event_type=event_type or row_dict.get('event_type', 'unknown'),
+            source=row_dict.get('source', 'system'),
             model_key=row_dict.get('model_key'),
-            status=row_dict['status'],
+            status=row_dict.get('status', 'queued'),
             stage=row_dict.get('stage'),
-            input_data=row_dict.get('input_data'),
-            output_data=row_dict.get('output_data'),
+            input_data=input_data,
+            output_data=output_data,
             user_agent=row_dict.get('user_agent'),
-            client_ip=row_dict.get('client_ip'),
+            client_ip=row_dict.get('client_ip') or row_dict.get('ip_address'),
             created_at=parse_date(row_dict['created_at']) if row_dict.get('created_at') else None,
             completed_at=parse_date(row_dict['completed_at']) if row_dict.get('completed_at') else None,
             error_message=row_dict.get('error_message'),
@@ -1216,6 +1285,27 @@ class EventRepository:
                     for row in rows:
                         row_dict = dict(row)
                         # Convert to Event object
+                        # Extract input_data and output_data based on table type
+                        input_data = None
+                        output_data = None
+                        
+                        if table_name == "predict_events":
+                            input_data = row_dict.get('input_data')
+                            output_data = row_dict.get('output_data')
+                        elif table_name == "train_events":
+                            input_data = row_dict.get('input_data')
+                            output_data = row_dict.get('metrics')
+                        elif table_name == "alert_events":
+                            input_data = row_dict.get('message')
+                            output_data = row_dict.get('details')
+                        elif table_name == "system_events":
+                            input_data = row_dict.get('message')
+                            output_data = row_dict.get('details')
+                        else:
+                            # Fallback for other tables
+                            input_data = row_dict.get('input_data') or row_dict.get('message') or row_dict.get('details')
+                            output_data = row_dict.get('output_data') or row_dict.get('metrics') or row_dict.get('details')
+                        
                         event = Event(
                             event_id=row_dict.get('event_id', ''),
                             event_type=default_type if not event_type else event_type,
@@ -1223,8 +1313,8 @@ class EventRepository:
                             model_key=row_dict.get('model_key'),
                             status=row_dict.get('status', 'queued'),
                             stage=row_dict.get('stage'),
-                            input_data=row_dict.get('input_data') or row_dict.get('message') or row_dict.get('details'),
-                            output_data=row_dict.get('output_data') or row_dict.get('metrics') or row_dict.get('details'),
+                            input_data=input_data,
+                            output_data=output_data,
                             user_agent=row_dict.get('user_agent'),
                             client_ip=row_dict.get('client_ip') or row_dict.get('ip_address'),
                             created_at=parse_date(row_dict['created_at']) if row_dict.get('created_at') else None,
@@ -1294,6 +1384,7 @@ class EventRepository:
         status: str,
         stage: Optional[str] = None,
         output_data: Optional[str] = None,
+        input_data: Optional[str] = None,
         error_message: Optional[str] = None,
         duration_ms: Optional[int] = None
     ) -> bool:
@@ -1304,64 +1395,82 @@ class EventRepository:
             "alert_events", "login_events", "system_events", "job_events"
         ]
         
-        with db_manager.logs_db.get_connection() as conn:
-            for table_name in tables_to_search:
-                try:
-                    # Check if event exists in this table
-                    event_row = conn.execute(
-                        f"SELECT event_id FROM {table_name} WHERE event_id = ?",
-                        (event_id,)
-                    ).fetchone()
-                    
-                    if event_row:
-                        # Build update query based on table structure
-                        updates = []
-                        update_params = []
-                        
-                        updates.append("status = ?")
-                        update_params.append(status)
-                        
-                        if stage is not None:
-                            if table_name in ["train_events", "predict_events", "job_events"]:
-                                updates.append("stage = ?")
-                                update_params.append(stage)
-                        
-                        if output_data is not None:
-                            if table_name == "train_events":
-                                updates.append("metrics = ?")
-                                update_params.append(output_data)
-                        
-                        if error_message is not None:
-                            if table_name in ["train_events", "predict_events", "job_events", "login_events"]:
-                                updates.append("error_message = ?")
-                                update_params.append(error_message)
-                        
-                        if duration_ms is not None:
-                            if table_name in ["train_events", "predict_events"]:
-                                updates.append("duration_ms = ?")
-                                update_params.append(duration_ms)
-                        
-                        # Set completed_at if status is completed or failed
-                        if status in ("completed", "failed"):
-                            if table_name in ["train_events", "predict_events", "job_events", "login_events"]:
-                                updates.append("completed_at = ?")
-                                update_params.append(datetime.now())
-                        
-                        # Build SQL update statement
-                        set_clause = ", ".join(updates)
-                        update_params.append(event_id)
-                        
-                        sql = f"UPDATE {table_name} SET {set_clause} WHERE event_id = ?"
-                        _queue_write("logs", WriteOperation.UPDATE, table_name, sql, tuple(update_params))
-                        
-                        logger.debug(f"Updated event {event_id} in {table_name}: status={status}, stage={stage}")
-                        return True
-                        
-                except Exception as e:
-                    logger.warning(f"Error updating event in {table_name}: {e}")
-                    continue
+        # Retry logic: events may be queued and not yet written to DB
+        max_retries = 3
+        retry_delay = 0.1
         
-        logger.warning(f"Event {event_id} not found in any event table")
+        for attempt in range(max_retries):
+            with db_manager.logs_db.get_connection() as conn:
+                for table_name in tables_to_search:
+                    try:
+                        # Check if event exists in this table
+                        event_row = conn.execute(
+                            f"SELECT event_id FROM {table_name} WHERE event_id = ?",
+                            (event_id,)
+                        ).fetchone()
+                        
+                        if event_row:
+                            # Build update query based on table structure
+                            updates = []
+                            update_params = []
+                            
+                            updates.append("status = ?")
+                            update_params.append(status)
+                            
+                            if stage is not None:
+                                if table_name in ["train_events", "predict_events", "job_events"]:
+                                    updates.append("stage = ?")
+                                    update_params.append(stage)
+                            
+                            if output_data is not None:
+                                if table_name == "train_events":
+                                    updates.append("metrics = ?")
+                                    update_params.append(output_data)
+                                elif table_name == "predict_events":
+                                    updates.append("output_data = ?")
+                                    update_params.append(output_data)
+                            
+                            if input_data is not None:
+                                if table_name == "predict_events":
+                                    updates.append("input_data = ?")
+                                    update_params.append(input_data)
+                            
+                            if error_message is not None:
+                                if table_name in ["train_events", "predict_events", "job_events", "login_events"]:
+                                    updates.append("error_message = ?")
+                                    update_params.append(error_message)
+                            
+                            if duration_ms is not None:
+                                if table_name in ["train_events", "predict_events"]:
+                                    updates.append("duration_ms = ?")
+                                    update_params.append(duration_ms)
+                            
+                            # Set completed_at if status is completed or failed
+                            if status in ("completed", "failed"):
+                                if table_name in ["train_events", "predict_events", "job_events", "login_events"]:
+                                    updates.append("completed_at = ?")
+                                    update_params.append(datetime.now())
+                            
+                            # Build SQL update statement
+                            set_clause = ", ".join(updates)
+                            update_params.append(event_id)
+                            
+                            sql = f"UPDATE {table_name} SET {set_clause} WHERE event_id = ?"
+                            _queue_write("logs", WriteOperation.UPDATE, table_name, sql, tuple(update_params))
+                            
+                            logger.debug(f"Updated event {event_id} in {table_name}: status={status}, stage={stage}")
+                            return True
+                            
+                    except Exception as e:
+                        logger.warning(f"Error updating event in {table_name}: {e}")
+                        continue
+            
+            # Event not found - may be queued, retry after delay
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+            else:
+                logger.warning(f"Event {event_id} not found in any event table after {max_retries} attempts")
+        
         return False
     
     def update_display_format(self, event_id: str, display_format: str) -> bool:

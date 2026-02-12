@@ -45,90 +45,36 @@ except Exception as e:
     logger.error(f"Failed to start write queue manager: {e}", exc_info=True)
     queue_manager = None
 
-# Check if migration is needed
+# Check if separated databases exist and create schemas if needed
 from pathlib import Path
-legacy_db_path = Path(settings.ML_DB_PATH)
-if legacy_db_path.exists():
-    logger.info("Legacy database found, checking if migration is needed...")
-    # Check if separated databases exist
-    models_db_path = Path(settings.ML_DB_MODELS_PATH)
-    users_db_path = Path(settings.ML_DB_USERS_PATH)
-    logs_db_path = Path(settings.ML_DB_LOGS_PATH)
-    
-    if not (models_db_path.exists() and users_db_path.exists() and logs_db_path.exists()):
-        logger.info("Separated databases not found, running migration...")
-        try:
-            create_schemas_for_separated_databases()
-            migration_result = migrate_to_separated_databases()
-            if migration_result.get("status") == "success":
-                logger.info(f"Migration completed successfully. Backup: {migration_result.get('backup_path')}")
-                logger.info(f"Migration statistics: {migration_result.get('statistics', {})}")
-            else:
-                logger.error(f"Migration failed: {migration_result.get('error')}")
-                # Continue anyway - schemas are created
-        except Exception as e:
-            logger.error(f"Error during migration: {e}", exc_info=True)
-            # Try to create schemas anyway
-            try:
-                create_schemas_for_separated_databases()
-                logger.info("Created separated database schemas despite migration error")
-            except Exception as schema_error:
-                logger.error(f"Failed to create schemas: {schema_error}", exc_info=True)
-    else:
-        logger.info("Separated databases already exist, skipping migration")
-        # Ensure schemas are up to date
-        try:
-            create_schemas_for_separated_databases()
-            logger.info("Separated database schemas verified/updated")
-            
-            # Check if users table is empty and legacy DB has users (one-time migration)
-            try:
-                with db_manager.users_db.get_connection() as conn:
-                    user_count = conn.execute("SELECT COUNT(*) as count FROM users").fetchone()
-                    if user_count and user_count['count'] == 0:
-                        logger.info("Users table is empty, checking legacy database for users...")
-                        # Try to migrate users from legacy DB if it exists (one-time only)
-                        if legacy_db_path.exists():
-                            try:
-                                import sqlite3
-                                legacy_conn = sqlite3.connect(
-                                    str(legacy_db_path),
-                                    timeout=settings.ML_DB_TIMEOUT,
-                                    check_same_thread=False
-                                )
-                                legacy_conn.row_factory = sqlite3.Row
-                                try:
-                                    legacy_users = legacy_conn.execute("SELECT COUNT(*) as count FROM users").fetchone()
-                                    if legacy_users and legacy_users['count'] > 0:
-                                        logger.info("Found users in legacy database, migrating...")
-                                        migration_result = migrate_to_separated_databases()
-                                        if migration_result.get("status") == "success":
-                                            logger.info(f"Users migrated successfully: {migration_result.get('statistics', {})}")
-                                finally:
-                                    legacy_conn.close()
-                            except Exception as migrate_error:
-                                logger.warning(f"Could not migrate users from legacy DB: {migrate_error}")
-            except Exception as check_error:
-                logger.warning(f"Could not check users table: {check_error}")
-        except Exception as e:
-            logger.warning(f"Could not verify schemas: {e}")
-else:
-    # No legacy database, just create schemas for separated databases
-    logger.info("No legacy database found, creating separated database schemas...")
+models_db_path = Path(settings.ML_DB_MODELS_PATH)
+users_db_path = Path(settings.ML_DB_USERS_PATH)
+logs_db_path = Path(settings.ML_DB_LOGS_PATH)
+
+if not (models_db_path.exists() and users_db_path.exists() and logs_db_path.exists()):
+    logger.info("Separated databases not found, creating schemas...")
     try:
         create_schemas_for_separated_databases()
         logger.info("Separated database schemas created successfully")
     except Exception as e:
         logger.error(f"Failed to create separated database schemas: {e}", exc_info=True)
+else:
+    logger.info("Separated databases already exist, verifying schemas...")
+    # Ensure schemas are up to date
+    try:
+        create_schemas_for_separated_databases()
+        logger.info("Separated database schemas verified/updated")
+    except Exception as e:
+        logger.warning(f"Could not verify schemas: {e}")
 
 # Run migrations for separated databases (if needed)
 # run_migrations()  # Legacy - not needed for separated databases
 
 # Create FastAPI app
 app = FastAPI(
-    title="ML Service 0.9.1",
+    title="ML Service 0.11.2",
     description="Production-grade ML Platform",
-    version="0.9.1"
+    version="0.11.2"
 )
 
 # Proxy headers middleware (must be first to process X-Forwarded-* headers)
@@ -255,7 +201,7 @@ async def startup_event():
         print("Job scheduler started")
     
     protocol = "https" if settings.ML_USE_HTTPS else "http"
-    print("ML Service 0.9.1 started")
+    print("ML Service 0.11.2 started")
     print(f"API available at {protocol}://{settings.ML_SERVICE_HOST}:{settings.ML_SERVICE_PORT}")
     if settings.ML_USE_HTTPS:
         print(f"HTTPS enabled with certificate: {settings.ML_SSL_CERT_FILE}")
@@ -284,5 +230,5 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error stopping write queue manager: {e}")
     
-    print("ML Service 0.9.1 stopped")
+    print("ML Service 0.11.2 stopped")
 

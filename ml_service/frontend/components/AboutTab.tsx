@@ -15,7 +15,7 @@ export default function AboutTab() {
     <div className={styles.aboutTab}>
       <div className={styles.header}>
         <h1 className={styles.title}>О проекте ML Service</h1>
-        <p className={styles.version}>Версия 0.10.0</p>
+        <p className={styles.version}>Версия 0.11.2</p>
       </div>
 
       <div className={styles.content}>

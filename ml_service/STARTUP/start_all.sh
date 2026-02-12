@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unified startup script for ML Service 0.9.1
+# Unified startup script for ML Service 0.11.2
 # Shows logs from both backend and frontend in the same window
 # Press 'r' + Enter to restart all services without closing terminal
 
@@ -66,7 +66,7 @@ stop_services() {
 # Function to start services
 start_services() {
     echo -e "${CYAN}========================================${NC}"
-    echo -e "${CYAN}ML Service 0.9.1 - Starting Services${NC}"
+    echo -e "${CYAN}ML Service 0.11.2 - Starting Services${NC}"
     echo -e "${CYAN}========================================${NC}"
     echo -e "${GREEN}Backend:  http://localhost:8085${NC}"
     echo -e "${GREEN}Frontend: http://localhost:6565${NC}"

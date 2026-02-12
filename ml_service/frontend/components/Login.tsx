@@ -157,7 +157,7 @@ export default function Login({ onLogin }: LoginProps) {
   return (
     <div className={styles.loginContainer}>
       <div className={styles.loginBox}>
-        <h1 className={styles.title}>ML Service 0.9.1</h1>
+        <h1 className={styles.title}>ML Service 0.11.2</h1>
         <p className={styles.subtitle}>Sign in to continue</p>
         
         {/* Auth Method Selector */}

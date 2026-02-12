@@ -308,20 +308,18 @@ db_manager = DatabaseManager()
 # DEPRECATED: Legacy support - kept only for migration purposes
 class DatabaseConnection:
     """
-    DEPRECATED: Legacy database connection manager.
-    This class is kept only for backward compatibility during migration.
+    DEPRECATED: This class is no longer supported.
     Use db_manager.models_db, db_manager.users_db, or db_manager.logs_db instead.
     """
     
     def __init__(self, db_path: str = None):
         import warnings
         warnings.warn(
-            "DatabaseConnection is deprecated. Use db_manager.models_db, db_manager.users_db, or db_manager.logs_db instead.",
+            "DatabaseConnection is deprecated and no longer supported. Use db_manager.models_db, db_manager.users_db, or db_manager.logs_db instead.",
             DeprecationWarning,
             stacklevel=2
         )
-        self.db_path = db_path or settings.ML_DB_PATH
-        self._ensure_db_directory()
+        raise NotImplementedError("DatabaseConnection is no longer supported. Use db_manager.models_db, db_manager.users_db, or db_manager.logs_db instead.")
     
     def _ensure_db_directory(self):
         """Ensure database directory exists"""
@@ -362,6 +360,6 @@ class DatabaseConnection:
             return conn.executemany(query, params_list)
 
 
-# DEPRECATED: Legacy global instance (for backward compatibility only)
+# DEPRECATED: Legacy global instance removed
 # Use db_manager.models_db, db_manager.users_db, or db_manager.logs_db instead
-db = DatabaseConnection()
+# db = DatabaseConnection()  # No longer supported

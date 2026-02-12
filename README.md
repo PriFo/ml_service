@@ -1,8 +1,8 @@
-# ML Service 0.9.1
+# ML Service 0.11.2
 
 Production-grade ML Platform с GPU поддержкой, drift monitoring и real-time dashboard.
 
-## 🆕 Что нового в версии 0.9.1
+## 🆕 Что нового в версии 0.11.2
 
 - ✨ **Система управления пользователями** - полное управление пользователями и их правами доступа
 - ✨ **Профиль пользователя** - управление своим профилем, паролем и API токенами
@@ -46,7 +46,7 @@ ml_service/
 │   │   │   ├── db/           # Database models, repositories, migrations
 │   │   │   └── tests/        # Unit tests
 │   │   ├── ml_artifacts/     # Сохраненные модели, features, baselines
-│   │   ├── ml_store.db       # SQLite база данных
+│   │   ├── databases/        # Разделенные базы данных (models.db, users.db, logs.db)
 │   │   └── requirements.txt
 │   ├── frontend/
 │   │   ├── app/              # Next.js app directory
@@ -295,8 +295,10 @@ ML_SERVICE_PORT=8085
 ML_LOG_LEVEL=INFO
 
 # Database
-ML_DB_PATH=./ml_store.db
 ML_DB_TIMEOUT=60
+ML_DB_MODELS_PATH=./databases/models.db
+ML_DB_USERS_PATH=./databases/users.db
+ML_DB_LOGS_PATH=./databases/logs.db
 
 # Artifacts
 ML_ARTIFACTS_ROOT=./ml_artifacts

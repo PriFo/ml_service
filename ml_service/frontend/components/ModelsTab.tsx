@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useModal } from '@/lib/hooks/useModal';
+import Modal from './Modal';
 import styles from './ModelsTab.module.css';
 
 interface ModelVersion {
@@ -48,6 +50,7 @@ interface ModelsTabProps {
 }
 
 export default function ModelsTab({ onNavigateToTraining }: ModelsTabProps = {}) {
+  const { modal, showConfirm, showSuccess, showError } = useModal();
   const [models, setModels] = useState<Model[]>([]);
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
@@ -144,7 +147,7 @@ export default function ModelsTab({ onNavigateToTraining }: ModelsTabProps = {})
       setIsModalOpen(true);
     } catch (error) {
       console.error('Failed to load model details:', error);
-      alert('Не удалось загрузить детали модели');
+      await showError('Не удалось загрузить детали модели');
     } finally {
       setIsLoading(false);
     }
@@ -188,21 +191,25 @@ export default function ModelsTab({ onNavigateToTraining }: ModelsTabProps = {})
   const handleDelete = async () => {
     if (!selectedModel) return;
     
-    if (!confirm(`Вы уверены, что хотите удалить модель "${selectedModel.modelKey}" версии "${selectedModel.version}"? Это действие нельзя отменить.`)) {
+    const confirmed = await showConfirm(
+      `Вы уверены, что хотите удалить модель "${selectedModel.modelKey}" версии "${selectedModel.version}"? Это действие нельзя отменить.`,
+      'Подтверждение удаления'
+    );
+    if (!confirmed) {
       return;
     }
 
     try {
       setIsDeleting(true);
       await api.deleteModel(selectedModel.modelKey, true);
-      alert('Модель успешно удалена');
+      await showSuccess('Модель успешно удалена');
       setIsModalOpen(false);
       setSelectedModel(null);
       setModelDetails(null);
       await loadModels();
     } catch (error: any) {
       console.error('Failed to delete model:', error);
-      alert(`Не удалось удалить модель: ${error.message || 'Неизвестная ошибка'}`);
+      await showError(`Не удалось удалить модель: ${error.message || 'Неизвестная ошибка'}`);
     } finally {
       setIsDeleting(false);
     }
@@ -231,8 +238,19 @@ export default function ModelsTab({ onNavigateToTraining }: ModelsTabProps = {})
   };
 
   return (
-    <div className={styles.modelsTab}>
-      <div className={styles.header}>
+    <>
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onCancel={modal.onCancel}
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+      />
+      <div className={styles.modelsTab}>
+        <div className={styles.header}>
         <h2>Модели</h2>
         <button 
           className={styles.newButton}
@@ -473,6 +491,7 @@ export default function ModelsTab({ onNavigateToTraining }: ModelsTabProps = {})
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

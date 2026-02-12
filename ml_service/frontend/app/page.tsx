@@ -101,9 +101,7 @@ export default function Home() {
         
         // Load alerts
         const alertsResponse = await api.getAlerts();
-        alertsResponse.alerts.forEach(alert => {
-          dispatch({ type: 'ADD_ALERT', payload: alert });
-        });
+        dispatch({ type: 'SET_ALERTS', payload: alertsResponse.alerts || [] });
         
         dispatch({ type: 'SET_LOADING', payload: false });
       } catch (error: any) {
@@ -137,6 +135,18 @@ export default function Home() {
       dispatch({ type: 'ADD_ALERT', payload: alert });
     });
 
+    // Periodically refresh alerts to ensure they stay in sync
+    const refreshAlerts = async () => {
+      try {
+        const alertsResponse = await api.getAlerts();
+        dispatch({ type: 'SET_ALERTS', payload: alertsResponse.alerts || [] });
+      } catch (error) {
+        // Silently handle errors - alerts will be refreshed on next load
+      }
+    };
+
+    const alertsInterval = setInterval(refreshAlerts, 30000); // Refresh every 30 seconds
+
     wsClient.on('queue:task_completed', (data: any) => {
       // Reload models when training completes
       api.getModels().then(response => {
@@ -148,6 +158,7 @@ export default function Home() {
 
     return () => {
       wsClient.disconnect();
+      clearInterval(alertsInterval);
     };
   }, [dispatch, state.isAuthenticated]);
 

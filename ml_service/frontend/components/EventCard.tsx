@@ -40,6 +40,29 @@ export default function EventCard({ event }: EventCardProps) {
     }
   };
 
+  const getStatusColor = () => {
+    const status = event.status?.toLowerCase();
+    switch (status) {
+      case 'failed':
+        return '#dc2626';
+      case 'completed':
+        return '#10b981';
+      case 'queued':
+        return '#6b7280';
+      case 'running':
+        return '#3b82f6';
+      case 'cancelled':
+      case 'canceled':
+        return '#9ca3af';
+      case 'warning':
+        return '#f59e0b';
+      case 'suspicious':
+        return '#f97316';
+      default:
+        return '#6b7280';
+    }
+  };
+
   const getProgress = (): number => {
     const status = event.status?.toLowerCase();
     const eventType = event.event_type?.toLowerCase();
@@ -114,6 +137,7 @@ export default function EventCard({ event }: EventCardProps) {
   };
 
   const color = getTypeColor();
+  const statusColor = getStatusColor();
   const progress = getProgress();
 
   return (
@@ -125,7 +149,20 @@ export default function EventCard({ event }: EventCardProps) {
         >
           {event.event_type}
         </div>
-        <div className={styles.eventStatus}>{event.status}</div>
+        <div 
+          className={styles.eventStatus}
+          style={{ 
+            color: statusColor,
+            backgroundColor: `${statusColor}20`,
+            padding: '0.25rem 0.75rem',
+            borderRadius: '4px',
+            fontWeight: 600,
+            fontSize: '0.75rem',
+            textTransform: 'uppercase'
+          }}
+        >
+          {event.status}
+        </div>
       </div>
 
       <div className={styles.eventInfo}>

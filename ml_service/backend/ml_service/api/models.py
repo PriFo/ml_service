@@ -53,10 +53,10 @@ class PredictionRequest(BaseModel):
 
 
 class PredictionItem(BaseModel):
-    input: Dict[str, Any]
-    prediction: str
-    confidence: float
-    all_scores: Dict[str, float]
+    input: Optional[Dict[str, Any]] = None
+    prediction: Optional[str] = None
+    confidence: Optional[float] = None
+    all_scores: Optional[Dict[str, float]] = None
 
 
 class PredictionResponse(BaseModel):

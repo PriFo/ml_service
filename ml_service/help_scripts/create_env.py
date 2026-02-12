@@ -7,8 +7,10 @@ ML_SERVICE_PORT=8085
 ML_LOG_LEVEL=INFO
 
 # Database Configuration
-ML_DB_PATH=./ml_store.db
-ML_DB_TIMEOUT=10
+ML_DB_TIMEOUT=60
+ML_DB_MODELS_PATH=./databases/models.db
+ML_DB_USERS_PATH=./databases/users.db
+ML_DB_LOGS_PATH=./databases/logs.db
 
 # Artifacts Paths
 ML_ARTIFACTS_ROOT=./ml_artifacts

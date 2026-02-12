@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     ML_TRUST_PROXY: bool = True  # Trust proxy headers (X-Forwarded-*)
     
     # Database
-    ML_DB_PATH: str = "./ml_store.db"  # DEPRECATED: Legacy path, used only for migration
     ML_DB_TIMEOUT: int = 60  # Increased timeout to handle concurrent writes and locks
     
     # Separated databases paths
@@ -72,6 +71,12 @@ class Settings(BaseSettings):
     ML_MIN_WORKERS: int = 1
     ML_MAX_WORKERS_LIMIT: int = 8
     ML_WORKER_CPU_PER_TASK: float = 0.5
+    
+    # CPU Resource Allocation (percentages)
+    ML_CPU_UI_RESPONSE_PERCENT: float = 0.05  # 5% for UI responses
+    ML_CPU_API_RESPONSE_PERCENT: float = 0.05  # 5% for API responses
+    ML_CPU_TRAIN_PREDICT_PERCENT: float = 0.80  # 80% for train/predict
+    ML_CPU_RESERVE_PERCENT: float = 0.10  # 10% reserve
     
     # ML Parameters
     ML_HIDDEN_LAYER_SIZES: str = "(512, 256, 128)"

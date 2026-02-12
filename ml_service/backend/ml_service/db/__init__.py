@@ -6,8 +6,7 @@ from ml_service.db.connection import (
     UsersDatabase,
     LogsDatabase,
     BaseDatabase,
-    DatabaseStatus,
-    db  # DEPRECATED: Legacy support only
+    DatabaseStatus
 )
 from ml_service.db.queue_manager import (
     WriteQueueManager,
@@ -29,6 +28,5 @@ __all__ = [
     'WriteQueueManager',
     'WriteOperation',
     'QueuedWrite',
-    'queue_manager_instance',
-    'db'  # DEPRECATED: Use db_manager instead
+    'queue_manager_instance'
 ]
